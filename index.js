@@ -1,13 +1,97 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require("discord.js");
 const http = require("http");
 
+// =========================
+// CONFIGURAÇÃO
+// =========================
+
 const TOKEN = process.env.TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+
+// =========================
+// CLIENTE DO DISCORD
+// =========================
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds
   ]
 });
+
+// =========================
+// COMANDOS
+// =========================
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("Mostra a latência do bot."),
+
+  new SlashCommandBuilder()
+    .setName("help")
+    .setDescription("Mostra os comandos disponíveis.")
+].map(command => command.toJSON());
+
+// =========================
+// REGISTRO DOS COMANDOS
+// =========================
+
+async function registerCommands() {
+  if (!TOKEN || !CLIENT_ID) {
+    console.log("❌ TOKEN ou CLIENT_ID não configurado.");
+    return;
+  }
+
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+  try {
+    console.log("🔄 Registrando comandos...");
+
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+
+    console.log("✅ Comandos registrados!");
+  } catch (error) {
+    console.error("❌ Erro ao registrar comandos:", error);
+  }
+}
+
+// =========================
+// BOT ONLINE
+// =========================
+
+client.once("ready", () => {
+  console.log(`🤖 Bot conectado como ${client.user.tag}`);
+  console.log(`🌐 Servidores: ${client.guilds.cache.size}`);
+});
+
+// =========================
+// INTERAÇÕES
+// =========================
+
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "ping") {
+    await interaction.reply(
+      `🏓 Pong! Latência: ${client.ws.ping}ms`
+    );
+  }
+
+  if (interaction.commandName === "help") {
+    await interaction.reply(
+      "**🤖 Comandos disponíveis:**\n\n" +
+      "`/ping` — Mostra a latência do bot.\n" +
+      "`/help` — Mostra esta mensagem."
+    );
+  }
+});
+
+// =========================
+// SERVIDOR HTTP — RENDER
+// =========================
 
 const PORT = process.env.PORT || 10000;
 
@@ -18,22 +102,17 @@ http.createServer((req, res) => {
 
   res.end("Bot Baguncinha online!");
 }).listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 HTTP funcionando na porta ${PORT}`);
+  console.log(`🌐 Servidor HTTP rodando na porta ${PORT}`);
 });
 
-client.once("ready", () => {
-  console.log(`🤖 BOT CONECTADO: ${client.user.tag}`);
-  console.log(`🌐 Servidores: ${client.guilds.cache.size}`);
-});
+// =========================
+// INICIALIZAÇÃO
+// =========================
 
-client.on("error", error => {
-  console.error("❌ Discord Client Error:", error);
-});
+async function start() {
+  await registerCommands();
 
-client.login(TOKEN)
-  .then(() => {
-    console.log("🔑 Login realizado com sucesso!");
-  })
-  .catch(error => {
-    console.error("❌ ERRO NO LOGIN:", error);
-  });
+  client.login(TOKEN);
+}
+
+start();
