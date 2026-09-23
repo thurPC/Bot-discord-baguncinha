@@ -14,6 +14,7 @@ const http = require("http");
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = "1370256381701128192";
 
 // =========================
 // CLIENTE DO DISCORD
@@ -26,16 +27,6 @@ const client = new Client({
     GatewayIntentBits.GuildPresences
   ]
 });
-
-// =========================
-// JOGOS E CARGOS
-// =========================
-
-const GAME_ROLES = {
-  valorant: "Valorant",
-  minecraft: "Minecraft",
-  fivem: "FiveM"
-};
 
 // =========================
 // COMANDOS
@@ -52,7 +43,7 @@ const commands = [
 ].map(command => command.toJSON());
 
 // =========================
-// REGISTRAR COMANDOS
+// REGISTRAR COMANDOS NO SERVIDOR
 // =========================
 
 async function registerCommands() {
@@ -64,23 +55,26 @@ async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
   try {
-    console.log("🔄 Registrando comandos...");
+    console.log("🔄 Registrando comandos no servidor...");
 
     await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
+      Routes.applicationGuildCommands(
+        CLIENT_ID,
+        GUILD_ID
+      ),
       {
         body: commands
       }
     );
 
-    console.log("✅ Comandos registrados!");
+    console.log("✅ Comandos registrados no servidor!");
   } catch (error) {
     console.error("❌ Erro ao registrar comandos:", error);
   }
 }
 
 // =========================
-// ENCONTRAR JOGO
+// IDENTIFICAR JOGO
 // =========================
 
 function getGameFromPresence(presence) {
@@ -91,22 +85,19 @@ function getGameFromPresence(presence) {
   for (const activity of presence.activities) {
     if (!activity.name) continue;
 
-    const gameName = activity.name.toLowerCase();
+    const game = activity.name.toLowerCase();
 
-    if (gameName.includes("valorant")) {
+    if (game.includes("valorant")) {
       return "valorant";
     }
 
-    if (
-      gameName.includes("minecraft") ||
-      gameName.includes("minecraft launcher")
-    ) {
+    if (game.includes("minecraft")) {
       return "minecraft";
     }
 
     if (
-      gameName.includes("fivem") ||
-      gameName.includes("five m")
+      game.includes("fivem") ||
+      game.includes("five m")
     ) {
       return "fivem";
     }
@@ -116,32 +107,14 @@ function getGameFromPresence(presence) {
 }
 
 // =========================
-// CRIAR / ENCONTRAR CARGO
+// CARGOS DOS JOGOS
 // =========================
 
-async function getOrCreateRole(guild, roleName) {
-  let role = guild.roles.cache.find(
-    r => r.name.toLowerCase() === roleName.toLowerCase()
-  );
-
-  if (role) {
-    return role;
-  }
-
-  try {
-    role = await guild.roles.create({
-      name: roleName,
-      reason: "Cargo automático de atividade do Baguncinha"
-    });
-
-    console.log(`✅ Cargo criado: ${roleName}`);
-
-    return role;
-  } catch (error) {
-    console.error(`❌ Não consegui criar o cargo ${roleName}:`, error);
-    return null;
-  }
-}
+const GAME_ROLES = {
+  valorant: "Valorant",
+  minecraft: "Minecraft",
+  fivem: "FiveM"
+};
 
 // =========================
 // ATUALIZAR CARGOS
@@ -157,40 +130,32 @@ async function updateGameRoles(member, game) {
 
     if (!role) continue;
 
-    // Se o usuário está jogando este jogo
-    if (GAME_ROLES[game] === roleName) {
-      if (!member.roles.cache.has(role.id)) {
-        try {
+    const shouldHaveRole =
+      game && GAME_ROLES[game] === roleName;
+
+    try {
+      if (shouldHaveRole) {
+        if (!member.roles.cache.has(role.id)) {
           await member.roles.add(role);
 
           console.log(
-            `🎮 ${member.user.tag} recebeu o cargo ${roleName}`
-          );
-        } catch (error) {
-          console.error(
-            `❌ Erro ao adicionar ${roleName}:`,
-            error
+            `🎮 ${member.user.tag} recebeu ${roleName}`
           );
         }
-      }
-    }
-
-    // Remove os outros cargos de jogo
-    else {
-      if (member.roles.cache.has(role.id)) {
-        try {
+      } else {
+        if (member.roles.cache.has(role.id)) {
           await member.roles.remove(role);
 
           console.log(
-            `🗑️ ${member.user.tag} perdeu o cargo ${roleName}`
-          );
-        } catch (error) {
-          console.error(
-            `❌ Erro ao remover ${roleName}:`,
-            error
+            `🗑️ ${member.user.tag} perdeu ${roleName}`
           );
         }
       }
+    } catch (error) {
+      console.error(
+        `❌ Erro com o cargo ${roleName}:`,
+        error
+      );
     }
   }
 }
@@ -205,48 +170,70 @@ client.once("ready", () => {
 });
 
 // =========================
-// MUDANÇA DE ATIVIDADE
+// ATUALIZAÇÃO DE PRESENÇA
 // =========================
 
-client.on("presenceUpdate", async (oldPresence, newPresence) => {
-  try {
-    if (!newPresence || !newPresence.member) return;
+client.on(
+  "presenceUpdate",
+  async (oldPresence, newPresence) => {
+    try {
+      if (!newPresence || !newPresence.member) {
+        return;
+      }
 
-    const member = newPresence.member;
+      const member = newPresence.member;
 
-    if (member.user.bot) return;
+      if (member.user.bot) return;
 
-    const game = getGameFromPresence(newPresence);
+      const game = getGameFromPresence(newPresence);
 
-    await updateGameRoles(member, game);
-  } catch (error) {
-    console.error("❌ Erro no sistema de cargos:", error);
+      await updateGameRoles(member, game);
+    } catch (error) {
+      console.error(
+        "❌ Erro no sistema de cargos:",
+        error
+      );
+    }
   }
-});
+);
 
 // =========================
-// INTERAÇÕES
+// COMANDOS
 // =========================
 
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  if (interaction.commandName === "ping") {
-    await interaction.reply(
-      `🏓 Pong! Latência: ${client.ws.ping}ms`
-    );
-  }
+  try {
+    if (interaction.commandName === "ping") {
+      await interaction.reply(
+        `🏓 Pong! Latência: ${client.ws.ping}ms`
+      );
+    }
 
-  if (interaction.commandName === "help") {
-    await interaction.reply(
-      "**🤖 Comandos disponíveis:**\n\n" +
-      "`/ping` — Mostra a latência do bot.\n" +
-      "`/help` — Mostra esta mensagem.\n\n" +
-      "**🎮 Cargos automáticos:**\n" +
-      "🎯 Valorant\n" +
-      "⛏️ Minecraft\n" +
-      "🚗 FiveM"
+    if (interaction.commandName === "help") {
+      await interaction.reply(
+        "**🤖 Comandos disponíveis:**\n\n" +
+        "`/ping` — Mostra a latência do bot.\n" +
+        "`/help` — Mostra esta mensagem.\n\n" +
+        "**🎮 Cargos automáticos:**\n" +
+        "🎯 Valorant\n" +
+        "⛏️ Minecraft\n" +
+        "🚗 FiveM"
+      );
+    }
+  } catch (error) {
+    console.error(
+      "❌ Erro ao responder comando:",
+      error
     );
+
+    if (!interaction.replied) {
+      await interaction.reply({
+        content: "❌ Ocorreu um erro ao executar o comando.",
+        ephemeral: true
+      });
+    }
   }
 });
 
@@ -256,24 +243,32 @@ client.on("interactionCreate", async interaction => {
 
 const PORT = process.env.PORT || 10000;
 
-http.createServer((req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/plain"
+http
+  .createServer((req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/plain"
+    });
+
+    res.end("Bot Baguncinha online!");
+  })
+  .listen(PORT, "0.0.0.0", () => {
+    console.log(
+      `🌐 Servidor HTTP rodando na porta ${PORT}`
+    );
   });
 
-  res.end("Bot Baguncinha online!");
-}).listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Servidor HTTP rodando na porta ${PORT}`);
-});
-
 // =========================
-// INICIALIZAÇÃO
+// INICIAR BOT
 // =========================
 
 async function start() {
   await registerCommands();
 
-  client.login(TOKEN);
+  console.log("🔑 Conectando ao Discord...");
+
+  await client.login(TOKEN);
 }
 
-start();
+start().catch(error => {
+  console.error("❌ Erro ao iniciar o bot:", error);
+});
