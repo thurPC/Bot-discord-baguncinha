@@ -14,6 +14,7 @@ const http = require("http");
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = "1370256381701128192";
 const PORT = process.env.PORT || 10000;
 
 // =========================
@@ -53,25 +54,28 @@ const commands = [
 ].map(command => command.toJSON());
 
 // =========================
-// REGISTRAR COMANDOS
+// REGISTRO DOS COMANDOS
 // =========================
 
 async function registerCommands() {
   try {
-    console.log("🔄 Registrando comandos...");
+    console.log("🔄 Registrando comandos no servidor...");
 
     const rest = new REST({
       version: "10"
     }).setToken(TOKEN);
 
     await rest.put(
-      Routes.applicationCommands(CLIENT_ID),
+      Routes.applicationGuildCommands(
+        CLIENT_ID,
+        GUILD_ID
+      ),
       {
         body: commands
       }
     );
 
-    console.log("✅ Comandos registrados!");
+    console.log("✅ Comandos registrados no servidor!");
   } catch (error) {
     console.error("❌ Erro ao registrar comandos:");
     console.error(error);
@@ -110,10 +114,9 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "ping") {
 
-      await interaction.reply({
-        content: `🏓 Pong!\nLatência: **${client.ws.ping}ms**`,
-        ephemeral: false
-      });
+      await interaction.reply(
+        `🏓 Pong!\nLatência: **${client.ws.ping}ms**`
+      );
 
       console.log("✅ /ping respondido");
       return;
@@ -125,29 +128,25 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "help") {
 
-      await interaction.reply({
-        content:
-          "**🤖 Bot Baguncinha — Comandos**\n\n" +
-          "🏓 `/ping` — Mostra a latência do bot.\n" +
-          "❓ `/help` — Mostra esta mensagem.",
-        ephemeral: false
-      });
+      await interaction.reply(
+        "**🤖 Bot Baguncinha — Comandos**\n\n" +
+        "🏓 `/ping` — Mostra a latência do bot.\n" +
+        "❓ `/help` — Mostra esta mensagem."
+      );
 
       console.log("✅ /help respondido");
       return;
     }
 
     // =========================
-    // COMANDO DESCONHECIDO
+    // DESCONHECIDO
     // =========================
 
     if (!interaction.replied && !interaction.deferred) {
-
       await interaction.reply({
         content: "❌ Esse comando ainda não está configurado.",
         ephemeral: true
       });
-
     }
 
   } catch (error) {
@@ -174,10 +173,8 @@ client.on("interactionCreate", async interaction => {
       }
 
     } catch (replyError) {
-
       console.error("❌ Não foi possível enviar mensagem de erro:");
       console.error(replyError);
-
     }
   }
 });
