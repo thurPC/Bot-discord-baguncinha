@@ -5,7 +5,8 @@ const {
   Routes,
   SlashCommandBuilder,
   EmbedBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ChannelType
 } = require("discord.js");
 const http = require("http");
 
@@ -35,7 +36,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates
   ]
 });
 
@@ -44,11 +46,19 @@ const client = new Client({
 // ⚠️ Isso zera toda vez que o bot reinicia.
 // Pra persistir de verdade, depois dá pra trocar por um arquivo JSON ou um banco (SQLite/Supabase).
 // =========================
-const xpData = new Map(); // key: userId, value: { xp, level, lastMessageTimestamp }
+// XP de texto e de voz são contados separadamente (níveis independentes),
+// mas os dois somam pro "nível total", que é o que libera os cargos por atividade.
+const xpData = new Map(); // key: userId, value: { textXp, textLevel, voiceXp, voiceLevel, lastMessageTimestamp }
 
 function getUserData(userId) {
   if (!xpData.has(userId)) {
-    xpData.set(userId, { xp: 0, level: 1, lastMessageTimestamp: 0 });
+    xpData.set(userId, {
+      textXp: 0,
+      textLevel: 1,
+      voiceXp: 0,
+      voiceLevel: 1,
+      lastMessageTimestamp: 0
+    });
   }
   return xpData.get(userId);
 }
@@ -57,14 +67,22 @@ function xpForNextLevel(level) {
   return level * 100;
 }
 
-function addXp(userId, amount) {
+function getTotalLevel(data) {
+  return data.textLevel + data.voiceLevel;
+}
+
+// type: "text" ou "voice" — cada um tem seu próprio XP/nível
+function addXp(userId, amount, type) {
   const data = getUserData(userId);
-  data.xp += amount;
+  const xpKey = type === "voice" ? "voiceXp" : "textXp";
+  const levelKey = type === "voice" ? "voiceLevel" : "textLevel";
+
+  data[xpKey] += amount;
 
   let leveledUp = false;
-  while (data.xp >= xpForNextLevel(data.level)) {
-    data.xp -= xpForNextLevel(data.level);
-    data.level += 1;
+  while (data[xpKey] >= xpForNextLevel(data[levelKey])) {
+    data[xpKey] -= xpForNextLevel(data[levelKey]);
+    data[levelKey] += 1;
     leveledUp = true;
   }
 
@@ -79,9 +97,9 @@ function addXp(userId, amount) {
 // O cargo do bot precisa estar ACIMA desses cargos na hierarquia,
 // e o bot precisa da permissão "Gerenciar Cargos".
 const LEVEL_ROLES = {
-  5: "1546574924448141484",   // ex: Membro Ativo
-  10: "1552496174882234479",  // ex: Veterano
-  20: "1552497344270958674"   // ex: Lenda do Servidor
+  7: "1546574924448141484",   // ex: Membro Ativo
+  15: "1552496174882234479",  // ex: Veterano
+  25: "1552497344270958674"   // ex: Lenda do Servidor
 };
 
 function getRoleIdForLevel(level) {
@@ -247,6 +265,9 @@ client.once("ready", () => {
   console.log(`🆔 ID: ${client.user.id}`);
   console.log(`🌐 Servidores: ${client.guilds.cache.size}`);
   console.log("=================================");
+
+  setInterval(tickVoiceXp, VOICE_XP_INTERVAL_MS);
+  console.log(`🎙️ Rastreamento de XP por voz ativado (a cada ${VOICE_XP_INTERVAL_MS / 60000} min)`);
 });
 
 // =========================
@@ -264,14 +285,14 @@ client.on("messageCreate", async message => {
 
   data.lastMessageTimestamp = now;
   const xpGained = Math.floor(Math.random() * 10) + 5; // 5 a 14 XP por mensagem
-  const { leveledUp, data: updated } = addXp(message.author.id, xpGained);
+  const { leveledUp, data: updated } = addXp(message.author.id, xpGained, "text");
 
   if (leveledUp) {
     message.channel
-      .send(`🎉 Parabéns ${message.author}, você subiu para o **nível ${updated.level}**!`)
+      .send(`💬 Parabéns ${message.author}, você subiu para o **nível de texto ${updated.textLevel}**!`)
       .catch(() => {});
 
-    const newRoleId = await updateLevelRole(message.guild, message.author.id, updated.level);
+    const newRoleId = await updateLevelRole(message.guild, message.author.id, getTotalLevel(updated));
     if (newRoleId) {
       message.channel
         .send(`🏅 ${message.author} também desbloqueou o cargo <@&${newRoleId}> por atividade!`)
@@ -279,6 +300,47 @@ client.on("messageCreate", async message => {
     }
   }
 });
+
+// =========================
+// GANHO DE XP POR VOZ (CALL)
+// =========================
+// A cada X minutos, todo mundo que está conectado em um canal de voz
+// (menos o canal AFK e bots) ganha XP de voz. É separado do XP de texto.
+const VOICE_XP_INTERVAL_MS = 5 * 60 * 1000; // a cada 5 minutos
+
+async function tickVoiceXp() {
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (!guild) return;
+
+  const voiceChannels = guild.channels.cache.filter(
+    channel => channel.type === ChannelType.GuildVoice && channel.id !== guild.afkChannelId
+  );
+
+  for (const channel of voiceChannels.values()) {
+    for (const member of channel.members.values()) {
+      if (member.user.bot) continue;
+
+      const xpGained = Math.floor(Math.random() * 10) + 15; // 15 a 24 XP a cada 5 min
+      const { leveledUp, data: updated } = addXp(member.id, xpGained, "voice");
+
+      if (leveledUp) {
+        const announceChannel = guild.systemChannel;
+        if (announceChannel) {
+          announceChannel
+            .send(`🎙️ Parabéns ${member}, você subiu para o **nível de voz ${updated.voiceLevel}**!`)
+            .catch(() => {});
+        }
+
+        const newRoleId = await updateLevelRole(guild, member.id, getTotalLevel(updated));
+        if (newRoleId && announceChannel) {
+          announceChannel
+            .send(`🏅 ${member} também desbloqueou o cargo <@&${newRoleId}> por atividade!`)
+            .catch(() => {});
+        }
+      }
+    }
+  }
+}
 
 // =========================
 // INTERAÇÕES
@@ -428,8 +490,8 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "perfil") {
       const user = interaction.options.getUser("usuario") || interaction.user;
       const data = getUserData(user.id);
-      const proximoNivel = xpForNextLevel(data.level);
-      const cargoAtualId = getRoleIdForLevel(data.level);
+      const totalLevel = getTotalLevel(data);
+      const cargoAtualId = getRoleIdForLevel(totalLevel);
       const cargoTexto = cargoAtualId && !cargoAtualId.startsWith("COLOQUE_")
         ? `<@&${cargoAtualId}>`
         : "Nenhum ainda";
@@ -438,9 +500,10 @@ client.on("interactionCreate", async interaction => {
         .setTitle(`Perfil de ${user.username}`)
         .setThumbnail(user.displayAvatarURL({ size: 256 }))
         .addFields(
-          { name: "Nível", value: `${data.level}`, inline: true },
-          { name: "XP", value: `${data.xp} / ${proximoNivel}`, inline: true },
-          { name: "Cargo por atividade", value: cargoTexto, inline: true }
+          { name: "💬 Nível de texto", value: `${data.textLevel} (${data.textXp}/${xpForNextLevel(data.textLevel)} XP)`, inline: true },
+          { name: "🎙️ Nível de voz", value: `${data.voiceLevel} (${data.voiceXp}/${xpForNextLevel(data.voiceLevel)} XP)`, inline: true },
+          { name: "⭐ Nível total", value: `${totalLevel}`, inline: true },
+          { name: "Cargo por atividade", value: cargoTexto }
         )
         .setColor(0x57f287);
 
@@ -455,13 +518,15 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "rank") {
       const ranking = [...xpData.entries()]
         .sort((a, b) => {
-          if (b[1].level !== a[1].level) return b[1].level - a[1].level;
-          return b[1].xp - a[1].xp;
+          const totalA = getTotalLevel(a[1]);
+          const totalB = getTotalLevel(b[1]);
+          if (totalB !== totalA) return totalB - totalA;
+          return (b[1].textXp + b[1].voiceXp) - (a[1].textXp + a[1].voiceXp);
         })
         .slice(0, 10);
 
       if (ranking.length === 0) {
-        await interaction.reply("Ainda não há dados de XP registrados. Manda umas mensagens aí!");
+        await interaction.reply("Ainda não há dados de XP registrados. Manda umas mensagens ou entra numa call!");
         return;
       }
 
@@ -469,7 +534,7 @@ client.on("interactionCreate", async interaction => {
         ranking.map(async ([userId, data], index) => {
           const user = await client.users.fetch(userId).catch(() => null);
           const nome = user ? user.username : `Usuário ${userId}`;
-          return `**${index + 1}.** ${nome} — Nível ${data.level} (${data.xp} XP)`;
+          return `**${index + 1}.** ${nome} — Nível total ${getTotalLevel(data)} (💬 ${data.textLevel} / 🎙️ ${data.voiceLevel})`;
         })
       );
 
