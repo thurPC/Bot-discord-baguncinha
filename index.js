@@ -204,7 +204,7 @@ const commands = [
     .addIntegerOption(option =>
       option
         .setName("minutos")
-        .setDescription("Em quantos minutos te avisar")
+        .setDescription("Em quantos minutos te avisar?")
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(1440)
@@ -383,7 +383,7 @@ client.on("interactionCreate", async interaction => {
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Seu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais nessa porra."
-        "⁉️ `/+comandos futuramente` — manda sugestão."
+        "⁉️ `/+` — manda sugestão de ideias de comandos ou parecidos."
       );
       console.log("✅ /help respondido");
       return;
