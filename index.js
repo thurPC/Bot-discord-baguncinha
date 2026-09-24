@@ -373,7 +373,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "help") {
       await interaction.reply(
-        "**🤖 Bot Baguncinha — oque posso fazer aq na house**\n\n" +
+        "**🤖 Bot Baguncinha — oque posso fazer aq na house?**\n\n" +
         "🏓 `/ping` — Confere se eu tô on e rapidão.\n" +
         "❓ `/help` — Essas mensagem aqui.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
@@ -382,7 +382,7 @@ client.on("interactionCreate", async interaction => {
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Seu nível e XP no servidor.\n" +
-        "🏆 `/rank` — Quem tá mandando mais nessa porra."
+        "🏆 `/rank` — Quem tá mais ativo no server."
       );
       console.log("✅ /help respondido");
       return;
@@ -435,7 +435,7 @@ client.on("interactionCreate", async interaction => {
       const guild = interaction.guild;
 
       const embed = new EmbedBuilder()
-        .setTitle(`Dados da quebrada — ${guild.name}`)
+        .setTitle(`Dados do baguncinha — ${guild.name}`)
         .setThumbnail(guild.iconURL({ size: 256 }) || null)
         .addFields(
           { name: "Membros", value: `${guild.memberCount}`, inline: true },
@@ -568,7 +568,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: "❌ Esse comando aí não existe, porra.",
+        content: "❌ Esse comando aí não existe, porra kkkkk.",
         ephemeral: true
       });
     }
@@ -580,7 +580,7 @@ client.on("interactionCreate", async interaction => {
     try {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
-          content: "❌ Deu ruim aqui, porra. Tenta de novo.",
+          content: "❌ Deu ruim aqui, em fi. Tenta de novo.",
           ephemeral: true
         });
       } else {
