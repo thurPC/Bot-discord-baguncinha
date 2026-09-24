@@ -63,8 +63,10 @@ function getUserData(userId) {
   return xpData.get(userId);
 }
 
-function xpForNextLevel(level) {
-  return level * 100;
+function xpForNextLevel(level, type) {
+  // Meta de voz é maior que a de texto, pra call longa não subir de nível rápido demais.
+  const base = type === "voice" ? 200 : 100;
+  return level * base;
 }
 
 function getTotalLevel(data) {
@@ -82,8 +84,8 @@ function addXp(userId, amount, type) {
   data[xpKey] += amount;
 
   let leveledUp = false;
-  while (data[xpKey] >= xpForNextLevel(data[levelKey])) {
-    data[xpKey] -= xpForNextLevel(data[levelKey]);
+  while (data[xpKey] >= xpForNextLevel(data[levelKey], type)) {
+    data[xpKey] -= xpForNextLevel(data[levelKey], type);
     data[levelKey] += 1;
     leveledUp = true;
   }
@@ -502,8 +504,8 @@ client.on("interactionCreate", async interaction => {
         .setTitle(`Perfil de ${user.username}`)
         .setThumbnail(user.displayAvatarURL({ size: 256 }))
         .addFields(
-          { name: "💬 Nível de texto", value: `${data.textLevel} (${data.textXp}/${xpForNextLevel(data.textLevel)} XP)`, inline: true },
-          { name: "🎙️ Nível de voz", value: `${data.voiceLevel} (${data.voiceXp}/${xpForNextLevel(data.voiceLevel)} XP)`, inline: true },
+          { name: "💬 Nível de texto", value: `${data.textLevel} (${data.textXp}/${xpForNextLevel(data.textLevel, "text")} XP)`, inline: true },
+          { name: "🎙️ Nível de voz", value: `${data.voiceLevel} (${data.voiceXp}/${xpForNextLevel(data.voiceLevel, "voice")} XP)`, inline: true },
           { name: "⭐ Nível de atividade", value: `${totalLevel} (maior entre os dois)`, inline: true },
           { name: "Cargo por atividade", value: cargoTexto }
         )
