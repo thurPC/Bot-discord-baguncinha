@@ -293,7 +293,7 @@ client.on("messageCreate", async message => {
 
   if (leveledUp) {
     message.channel
-      .send(`💬 Salve ${message.author}, você subiu pro **nível de texto ${updated.textLevel}**!`)
+      .send(`💬 boa cria ${message.author}, você subiu pro **nível de texto ${updated.textLevel}**!`)
       .catch(() => {});
 
     const newRoleId = await updateLevelRole(message.guild, message.author.id, getTotalLevel(updated));
@@ -310,7 +310,7 @@ client.on("messageCreate", async message => {
 // =========================
 // A cada X minutos, todo mundo que está conectado em um canal de voz
 // (menos o canal AFK e bots) ganha XP de voz. É separado do XP de texto.
-const VOICE_XP_INTERVAL_MS = 5 * 60 * 1000; // a cada 5 minutos
+const VOICE_XP_INTERVAL_MS = 7 * 50 * 1000; // a cada 5 minutos
 
 async function tickVoiceXp() {
   const guild = client.guilds.cache.get(GUILD_ID);
@@ -331,14 +331,14 @@ async function tickVoiceXp() {
         const announceChannel = guild.systemChannel;
         if (announceChannel) {
           announceChannel
-            .send(`🎙️ Salve ${member}, você subiu pro **nível de voz ${updated.voiceLevel}**!`)
+            .send(`🎙️ boa cria ${member}, você subiu pro **nível de voz ${updated.voiceLevel}**!`)
             .catch(() => {});
         }
 
         const newRoleId = await updateLevelRole(guild, member.id, getTotalLevel(updated));
         if (newRoleId && announceChannel) {
           announceChannel
-            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> na correria!`)
+            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> na marra krl!`)
             .catch(() => {});
         }
       }
@@ -378,10 +378,10 @@ client.on("interactionCreate", async interaction => {
         "❓ `/help` — Essa mensagem aqui.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
         "👤 `/userinfo` — Perfil completo da pessoa.\n" +
-        "🏠 `/serverinfo` — Os dados da nossa quebrada.\n" +
+        "🏠 `/serverinfo` — Os dados da baguncinha.\n" +
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
-        "📊 `/perfil` — Teu nível e XP no servidor.\n" +
+        "📊 `/perfil` — Seu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais nessa porra."
       );
       console.log("✅ /help respondido");
