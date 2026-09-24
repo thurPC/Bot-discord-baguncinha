@@ -79,9 +79,9 @@ function addXp(userId, amount) {
 // O cargo do bot precisa estar ACIMA desses cargos na hierarquia,
 // e o bot precisa da permissão "Gerenciar Cargos".
 const LEVEL_ROLES = {
-  7: "1546574924448141484",   // ex: Membro Ativo
-  15: "1552496174882234479",  // ex: Veterano
-  25: "1552497344270958674"   // ex: Lenda do Servidor
+  5: "1546574924448141484",   // ex: Membro Ativo
+  10: "1552496174882234479",  // ex: Veterano
+  20: "1552497344270958674"   // ex: Lenda do Servidor
 };
 
 function getRoleIdForLevel(level) {
