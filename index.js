@@ -68,7 +68,9 @@ function xpForNextLevel(level) {
 }
 
 function getTotalLevel(data) {
-  return data.textLevel + data.voiceLevel;
+  // Cargo por atividade considera o MAIOR nível entre texto e voz
+  // (não soma os dois, pra call longa não destravar cargo rápido demais)
+  return Math.max(data.textLevel, data.voiceLevel);
 }
 
 // type: "text" ou "voice" — cada um tem seu próprio XP/nível
@@ -502,7 +504,7 @@ client.on("interactionCreate", async interaction => {
         .addFields(
           { name: "💬 Nível de texto", value: `${data.textLevel} (${data.textXp}/${xpForNextLevel(data.textLevel)} XP)`, inline: true },
           { name: "🎙️ Nível de voz", value: `${data.voiceLevel} (${data.voiceXp}/${xpForNextLevel(data.voiceLevel)} XP)`, inline: true },
-          { name: "⭐ Nível total", value: `${totalLevel}`, inline: true },
+          { name: "⭐ Nível de atividade", value: `${totalLevel} (maior entre os dois)`, inline: true },
           { name: "Cargo por atividade", value: cargoTexto }
         )
         .setColor(0x57f287);
@@ -534,7 +536,7 @@ client.on("interactionCreate", async interaction => {
         ranking.map(async ([userId, data], index) => {
           const user = await client.users.fetch(userId).catch(() => null);
           const nome = user ? user.username : `Usuário ${userId}`;
-          return `**${index + 1}.** ${nome} — Nível total ${getTotalLevel(data)} (💬 ${data.textLevel} / 🎙️ ${data.voiceLevel})`;
+          return `**${index + 1}.** ${nome} — Nível de atividade ${getTotalLevel(data)} (💬 ${data.textLevel} / 🎙️ ${data.voiceLevel})`;
         })
       );
 
