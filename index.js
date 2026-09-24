@@ -382,7 +382,7 @@ client.on("interactionCreate", async interaction => {
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Teu nível e XP no servidor.\n" +
-        "🏆 `/rank` — Quem tá mandando mais aqui na área."
+        "🏆 `/rank` — Quem tá mandando mais nessa porra."
       );
       console.log("✅ /help respondido");
       return;
@@ -461,7 +461,7 @@ client.on("interactionCreate", async interaction => {
       const deleted = await interaction.channel.bulkDelete(quantidade, true);
 
       await interaction.editReply(
-        `🧹 Pronto, apaguei ${deleted.size} mensagem(ns).`
+        `🧹 Pronto, sumi com ${deleted.size} mensagem(ns) dessa porra.`
       );
       console.log("✅ /clear respondido");
       return;
@@ -534,18 +534,29 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      const linhas = await Promise.all(
-        ranking.map(async ([userId, data], index) => {
-          const user = await client.users.fetch(userId).catch(() => null);
-          const nome = user ? user.username : `Usuário ${userId}`;
-          return `**${index + 1}.** ${nome} — Nível ${getTotalLevel(data)} (💬 ${data.textLevel} / 🎙️ ${data.voiceLevel})`;
-        })
+      const MEDALHAS = ["🥇", "🥈", "🥉"];
+
+      const usuarios = await Promise.all(
+        ranking.map(([userId]) => client.users.fetch(userId).catch(() => null))
       );
 
+      const linhas = ranking.map(([, data], index) => {
+        const user = usuarios[index];
+        const nome = user ? user.username : "Usuário desconhecido";
+        const posicao = MEDALHAS[index] || `**${index + 1}.**`;
+
+        return (
+          `${posicao} **${nome}** — Nível ${getTotalLevel(data)}\n` +
+          `　　💬 Texto: ${data.textLevel}  •  🎙️ Voz: ${data.voiceLevel}`
+        );
+      });
+
       const embed = new EmbedBuilder()
-        .setTitle("🏆 Ranking da quebrada")
-        .setDescription(linhas.join("\n"))
-        .setColor(0xfee75c);
+        .setTitle("🏆 Ranking dessa porra")
+        .setDescription(linhas.join("\n\n"))
+        .setColor(0xfee75c)
+        .setThumbnail(usuarios[0]?.displayAvatarURL({ size: 256 }) || null)
+        .setFooter({ text: `Top ${ranking.length} de atividade no servidor` });
 
       await interaction.reply({ embeds: [embed] });
       console.log("✅ /rank respondido");
@@ -557,7 +568,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: "❌ Esse comando aí não existe.",
+        content: "❌ Esse comando aí não existe, porra.",
         ephemeral: true
       });
     }
@@ -569,12 +580,12 @@ client.on("interactionCreate", async interaction => {
     try {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
-          content: "❌ Deu ruim aqui, tenta de novo.",
+          content: "❌ Deu ruim aqui, porra. Tenta de novo.",
           ephemeral: true
         });
       } else {
         await interaction.reply({
-          content: "❌ Deu ruim aqui, tenta de novo.",
+          content: "❌ Deu ruim aqui, porra. Tenta de novo.",
           ephemeral: true
         });
       }
