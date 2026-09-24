@@ -293,13 +293,13 @@ client.on("messageCreate", async message => {
 
   if (leveledUp) {
     message.channel
-      .send(`💬 Parabéns ${message.author}, você subiu para o **nível de texto ${updated.textLevel}**!`)
+      .send(`💬 Aí ${message.author}, subiu pro **nível de texto ${updated.textLevel}**! Sextou na área.`)
       .catch(() => {});
 
     const newRoleId = await updateLevelRole(message.guild, message.author.id, getTotalLevel(updated));
     if (newRoleId) {
       message.channel
-        .send(`🏅 ${message.author} também desbloqueou o cargo <@&${newRoleId}> por atividade!`)
+        .send(`🏅 ${message.author} ainda ganhou o cargo <@&${newRoleId}> por ser presença!`)
         .catch(() => {});
     }
   }
@@ -331,14 +331,14 @@ async function tickVoiceXp() {
         const announceChannel = guild.systemChannel;
         if (announceChannel) {
           announceChannel
-            .send(`🎙️ Parabéns ${member}, você subiu para o **nível de voz ${updated.voiceLevel}**!`)
+            .send(`🎙️ Aí ${member}, subiu pro **nível de voz ${updated.voiceLevel}**! Tava na call desde cedo.`)
             .catch(() => {});
         }
 
         const newRoleId = await updateLevelRole(guild, member.id, getTotalLevel(updated));
         if (newRoleId && announceChannel) {
           announceChannel
-            .send(`🏅 ${member} também desbloqueou o cargo <@&${newRoleId}> por atividade!`)
+            .send(`🏅 ${member} ainda ganhou o cargo <@&${newRoleId}> por ser presença!`)
             .catch(() => {});
         }
       }
@@ -362,7 +362,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "ping") {
       await interaction.reply(
-        `🏓 Pong!\nLatência: **${client.ws.ping}ms**`
+        `🏓 Fala cria, cheguei!\nPing: **${client.ws.ping}ms**`
       );
       console.log("✅ /ping respondido");
       return;
@@ -373,16 +373,16 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "help") {
       await interaction.reply(
-        "**🤖 Bot Baguncinha — Comandos**\n\n" +
-        "🏓 `/ping` — Mostra a latência do bot.\n" +
-        "❓ `/help` — Mostra esta mensagem.\n" +
-        "🖼️ `/avatar` — Mostra o avatar de alguém.\n" +
-        "👤 `/userinfo` — Informações de um membro.\n" +
-        "🏠 `/serverinfo` — Informações do servidor.\n" +
-        "🧹 `/clear` — Apaga mensagens (moderação).\n" +
-        "⏰ `/lembrete` — Cria um lembrete.\n" +
-        "📊 `/perfil` — Mostra seu nível e XP.\n" +
-        "🏆 `/rank` — Ranking de XP do servidor."
+        "**🤖 Bot Baguncinha — os bagulho que eu faço**\n\n" +
+        "🏓 `/ping` — Confere se eu tô on e rapidão.\n" +
+        "❓ `/help` — Essa mensagem aqui, óbvio.\n" +
+        "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
+        "👤 `/userinfo` — O perfil completo da pessoa.\n" +
+        "🏠 `/serverinfo` — Os dados da nossa quebrada.\n" +
+        "🧹 `/clear` — Zera as mensagem (só pra staff).\n" +
+        "⏰ `/lembrete` — Te chamo na hora certa, sem enrolar.\n" +
+        "📊 `/perfil` — Teu corre no servidor, nível e XP.\n" +
+        "🏆 `/rank` — Quem tá mandando mais aqui na área."
       );
       console.log("✅ /help respondido");
       return;
@@ -395,7 +395,7 @@ client.on("interactionCreate", async interaction => {
       const user = interaction.options.getUser("usuario") || interaction.user;
 
       const embed = new EmbedBuilder()
-        .setTitle(`Avatar de ${user.username}`)
+        .setTitle(`Foto de ${user.username}`)
         .setImage(user.displayAvatarURL({ size: 1024, extension: "png" }))
         .setColor(0x5865f2);
 
@@ -412,13 +412,13 @@ client.on("interactionCreate", async interaction => {
       const member = await interaction.guild.members.fetch(user.id);
 
       const embed = new EmbedBuilder()
-        .setTitle(`Informações de ${user.username}`)
+        .setTitle(`Os corre de ${user.username}`)
         .setThumbnail(user.displayAvatarURL({ size: 256 }))
         .addFields(
           { name: "ID", value: user.id, inline: true },
           { name: "Apelido", value: member.nickname || "Nenhum", inline: true },
           { name: "Cargos", value: `${member.roles.cache.size - 1}`, inline: true },
-          { name: "Entrou no servidor", value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` },
+          { name: "Chegou na área", value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` },
           { name: "Conta criada", value: `<t:${Math.floor(user.createdTimestamp / 1000)}:R>` }
         )
         .setColor(0x5865f2);
@@ -435,13 +435,13 @@ client.on("interactionCreate", async interaction => {
       const guild = interaction.guild;
 
       const embed = new EmbedBuilder()
-        .setTitle(`Informações de ${guild.name}`)
+        .setTitle(`Os dados da quebrada ${guild.name}`)
         .setThumbnail(guild.iconURL({ size: 256 }) || null)
         .addFields(
           { name: "Membros", value: `${guild.memberCount}`, inline: true },
           { name: "Cargos", value: `${guild.roles.cache.size}`, inline: true },
           { name: "Canais", value: `${guild.channels.cache.size}`, inline: true },
-          { name: "Criado em", value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>` }
+          { name: "Fundada em", value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>` }
         )
         .setColor(0x5865f2);
 
@@ -461,7 +461,7 @@ client.on("interactionCreate", async interaction => {
       const deleted = await interaction.channel.bulkDelete(quantidade, true);
 
       await interaction.editReply(
-        `🧹 ${deleted.size} mensagem(ns) apagada(s) com sucesso.`
+        `🧹 Pronto, sumi com ${deleted.size} mensagem(ns). Tava lotado esse papo.`
       );
       console.log("✅ /clear respondido");
       return;
@@ -475,12 +475,12 @@ client.on("interactionCreate", async interaction => {
       const mensagem = interaction.options.getString("mensagem");
 
       await interaction.reply(
-        `⏰ Ok! Vou te lembrar em **${minutos} minuto(s)**: "${mensagem}"`
+        `⏰ Fechou, cria! Te dou um toque em **${minutos} minuto(s)**: "${mensagem}"`
       );
 
       setTimeout(() => {
         interaction.followUp(
-          `🔔 ${interaction.user}, lembrete: **${mensagem}**`
+          `🔔 Ô ${interaction.user}, chegou a hora: **${mensagem}**`
         ).catch(() => {});
       }, minutos * 60 * 1000);
 
@@ -501,13 +501,13 @@ client.on("interactionCreate", async interaction => {
         : "Nenhum ainda";
 
       const embed = new EmbedBuilder()
-        .setTitle(`Perfil de ${user.username}`)
+        .setTitle(`O corre de ${user.username}`)
         .setThumbnail(user.displayAvatarURL({ size: 256 }))
         .addFields(
           { name: "💬 Nível de texto", value: `${data.textLevel} (${data.textXp}/${xpForNextLevel(data.textLevel, "text")} XP)`, inline: true },
           { name: "🎙️ Nível de voz", value: `${data.voiceLevel} (${data.voiceXp}/${xpForNextLevel(data.voiceLevel, "voice")} XP)`, inline: true },
-          { name: "⭐ Nível de atividade", value: `${totalLevel} (maior entre os dois)`, inline: true },
-          { name: "Cargo por atividade", value: cargoTexto }
+          { name: "⭐ Nível de atividade", value: `${totalLevel} (o maior entre os dois)`, inline: true },
+          { name: "Cargo pela correria", value: cargoTexto }
         )
         .setColor(0x57f287);
 
@@ -530,7 +530,7 @@ client.on("interactionCreate", async interaction => {
         .slice(0, 10);
 
       if (ranking.length === 0) {
-        await interaction.reply("Ainda não há dados de XP registrados. Manda umas mensagens ou entra numa call!");
+        await interaction.reply("Ainda não rolou nada por aqui não. Bora soltar uma mensagem ou entrar numa call!");
         return;
       }
 
@@ -538,12 +538,12 @@ client.on("interactionCreate", async interaction => {
         ranking.map(async ([userId, data], index) => {
           const user = await client.users.fetch(userId).catch(() => null);
           const nome = user ? user.username : `Usuário ${userId}`;
-          return `**${index + 1}.** ${nome} — Nível de atividade ${getTotalLevel(data)} (💬 ${data.textLevel} / 🎙️ ${data.voiceLevel})`;
+          return `**${index + 1}.** ${nome} — Nível ${getTotalLevel(data)} (💬 ${data.textLevel} / 🎙️ ${data.voiceLevel})`;
         })
       );
 
       const embed = new EmbedBuilder()
-        .setTitle("🏆 Ranking do Servidor")
+        .setTitle("🏆 Os cria mais ativos da área")
         .setDescription(linhas.join("\n"))
         .setColor(0xfee75c);
 
@@ -557,7 +557,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: "❌ Esse comando ainda não está configurado.",
+        content: "❌ Esse comando aí ainda não existe, mano.",
         ephemeral: true
       });
     }
@@ -569,12 +569,12 @@ client.on("interactionCreate", async interaction => {
     try {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
-          content: "❌ Ocorreu um erro ao executar esse comando.",
+          content: "❌ Deu ruim aqui, tenta de novo.",
           ephemeral: true
         });
       } else {
         await interaction.reply({
-          content: "❌ Ocorreu um erro ao executar esse comando.",
+          content: "❌ Deu ruim aqui, tenta de novo.",
           ephemeral: true
         });
       }
@@ -605,7 +605,7 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/plain; charset=utf-8"
   });
-  res.end("🤖 Bot Baguncinha online!");
+  res.end("🤖 Bot Baguncinha na área, tudo funcionando!");
 });
 
 server.listen(PORT, "0.0.0.0", () => {
