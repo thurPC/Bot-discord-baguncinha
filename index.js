@@ -293,13 +293,13 @@ client.on("messageCreate", async message => {
 
   if (leveledUp) {
     message.channel
-      .send(`💬 Aí ${message.author}, subiu pro **nível de texto ${updated.textLevel}**! Sextou na área.`)
+      .send(`💬 Salve ${message.author}, você subiu pro **nível de texto ${updated.textLevel}**!`)
       .catch(() => {});
 
     const newRoleId = await updateLevelRole(message.guild, message.author.id, getTotalLevel(updated));
     if (newRoleId) {
       message.channel
-        .send(`🏅 ${message.author} ainda ganhou o cargo <@&${newRoleId}> por ser presença!`)
+        .send(`🏅 ${message.author} desbloqueou o cargo <@&${newRoleId}> na correria!`)
         .catch(() => {});
     }
   }
@@ -331,14 +331,14 @@ async function tickVoiceXp() {
         const announceChannel = guild.systemChannel;
         if (announceChannel) {
           announceChannel
-            .send(`🎙️ Aí ${member}, subiu pro **nível de voz ${updated.voiceLevel}**! Tava na call desde cedo.`)
+            .send(`🎙️ Salve ${member}, você subiu pro **nível de voz ${updated.voiceLevel}**!`)
             .catch(() => {});
         }
 
         const newRoleId = await updateLevelRole(guild, member.id, getTotalLevel(updated));
         if (newRoleId && announceChannel) {
           announceChannel
-            .send(`🏅 ${member} ainda ganhou o cargo <@&${newRoleId}> por ser presença!`)
+            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> na correria!`)
             .catch(() => {});
         }
       }
@@ -362,7 +362,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "ping") {
       await interaction.reply(
-        `🏓 Fala cria, cheguei!\nPing: **${client.ws.ping}ms**`
+        `🏓 Salve! Tô on.\nPing: **${client.ws.ping}ms**`
       );
       console.log("✅ /ping respondido");
       return;
@@ -373,15 +373,15 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "help") {
       await interaction.reply(
-        "**🤖 Bot Baguncinha — os bagulho que eu faço**\n\n" +
+        "**🤖 Bot Baguncinha — os corre que eu faço**\n\n" +
         "🏓 `/ping` — Confere se eu tô on e rapidão.\n" +
-        "❓ `/help` — Essa mensagem aqui, óbvio.\n" +
+        "❓ `/help` — Essa mensagem aqui.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
-        "👤 `/userinfo` — O perfil completo da pessoa.\n" +
+        "👤 `/userinfo` — Perfil completo da pessoa.\n" +
         "🏠 `/serverinfo` — Os dados da nossa quebrada.\n" +
-        "🧹 `/clear` — Zera as mensagem (só pra staff).\n" +
-        "⏰ `/lembrete` — Te chamo na hora certa, sem enrolar.\n" +
-        "📊 `/perfil` — Teu corre no servidor, nível e XP.\n" +
+        "🧹 `/clear` — Zera as mensagem (só staff).\n" +
+        "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
+        "📊 `/perfil` — Teu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais aqui na área."
       );
       console.log("✅ /help respondido");
@@ -412,7 +412,7 @@ client.on("interactionCreate", async interaction => {
       const member = await interaction.guild.members.fetch(user.id);
 
       const embed = new EmbedBuilder()
-        .setTitle(`Os corre de ${user.username}`)
+        .setTitle(`Perfil de ${user.username}`)
         .setThumbnail(user.displayAvatarURL({ size: 256 }))
         .addFields(
           { name: "ID", value: user.id, inline: true },
@@ -435,7 +435,7 @@ client.on("interactionCreate", async interaction => {
       const guild = interaction.guild;
 
       const embed = new EmbedBuilder()
-        .setTitle(`Os dados da quebrada ${guild.name}`)
+        .setTitle(`Dados da quebrada — ${guild.name}`)
         .setThumbnail(guild.iconURL({ size: 256 }) || null)
         .addFields(
           { name: "Membros", value: `${guild.memberCount}`, inline: true },
@@ -461,7 +461,7 @@ client.on("interactionCreate", async interaction => {
       const deleted = await interaction.channel.bulkDelete(quantidade, true);
 
       await interaction.editReply(
-        `🧹 Pronto, sumi com ${deleted.size} mensagem(ns). Tava lotado esse papo.`
+        `🧹 Pronto, apaguei ${deleted.size} mensagem(ns).`
       );
       console.log("✅ /clear respondido");
       return;
@@ -475,7 +475,7 @@ client.on("interactionCreate", async interaction => {
       const mensagem = interaction.options.getString("mensagem");
 
       await interaction.reply(
-        `⏰ Fechou, cria! Te dou um toque em **${minutos} minuto(s)**: "${mensagem}"`
+        `⏰ Fechou! Te dou um toque em **${minutos} minuto(s)**: "${mensagem}"`
       );
 
       setTimeout(() => {
@@ -501,7 +501,7 @@ client.on("interactionCreate", async interaction => {
         : "Nenhum ainda";
 
       const embed = new EmbedBuilder()
-        .setTitle(`O corre de ${user.username}`)
+        .setTitle(`Perfil de ${user.username}`)
         .setThumbnail(user.displayAvatarURL({ size: 256 }))
         .addFields(
           { name: "💬 Nível de texto", value: `${data.textLevel} (${data.textXp}/${xpForNextLevel(data.textLevel, "text")} XP)`, inline: true },
@@ -530,7 +530,7 @@ client.on("interactionCreate", async interaction => {
         .slice(0, 10);
 
       if (ranking.length === 0) {
-        await interaction.reply("Ainda não rolou nada por aqui não. Bora soltar uma mensagem ou entrar numa call!");
+        await interaction.reply("Ainda não rolou nada por aqui. Manda umas mensagens ou entra numa call!");
         return;
       }
 
@@ -543,7 +543,7 @@ client.on("interactionCreate", async interaction => {
       );
 
       const embed = new EmbedBuilder()
-        .setTitle("🏆 Os cria mais ativos da área")
+        .setTitle("🏆 Ranking da quebrada")
         .setDescription(linhas.join("\n"))
         .setColor(0xfee75c);
 
@@ -557,7 +557,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: "❌ Esse comando aí ainda não existe, mano.",
+        content: "❌ Esse comando aí não existe.",
         ephemeral: true
       });
     }
@@ -605,7 +605,7 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/plain; charset=utf-8"
   });
-  res.end("🤖 Bot Baguncinha na área, tudo funcionando!");
+  res.end("🤖 Bot Baguncinha na área, tudo certo!");
 });
 
 server.listen(PORT, "0.0.0.0", () => {
