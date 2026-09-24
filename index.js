@@ -34,7 +34,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
   ]
 });
 
@@ -68,6 +69,62 @@ function addXp(userId, amount) {
   }
 
   return { data, leveledUp };
+}
+
+// =========================
+// CARGOS POR NÍVEL (ATIVIDADE)
+// =========================
+// Coloque aqui o nível mínimo e o ID do cargo correspondente.
+// Copie o ID do cargo no Discord com o Modo Desenvolvedor ativado.
+// O cargo do bot precisa estar ACIMA desses cargos na hierarquia,
+// e o bot precisa da permissão "Gerenciar Cargos".
+const LEVEL_ROLES = {
+  7: "1546574924448141484",   // ex: Membro Ativo
+  15: "1552496174882234479",  // ex: Veterano
+  25: "1552497344270958674"   // ex: Lenda do Servidor
+};
+
+function getRoleIdForLevel(level) {
+  let targetRoleId = null;
+  let highestThreshold = 0;
+
+  for (const [threshold, roleId] of Object.entries(LEVEL_ROLES)) {
+    const t = Number(threshold);
+    if (level >= t && t > highestThreshold) {
+      highestThreshold = t;
+      targetRoleId = roleId;
+    }
+  }
+
+  return targetRoleId;
+}
+
+async function updateLevelRole(guild, userId, level) {
+  const targetRoleId = getRoleIdForLevel(level);
+  if (!targetRoleId || targetRoleId.startsWith("COLOQUE_")) return null;
+
+  try {
+    const member = await guild.members.fetch(userId);
+    if (member.roles.cache.has(targetRoleId)) return null; // já tem
+
+    // Remove cargos de nível anteriores (pra ficar só com o mais alto)
+    const allLevelRoleIds = Object.values(LEVEL_ROLES).filter(
+      id => !id.startsWith("COLOQUE_")
+    );
+    const rolesToRemove = allLevelRoleIds.filter(
+      id => id !== targetRoleId && member.roles.cache.has(id)
+    );
+    if (rolesToRemove.length > 0) {
+      await member.roles.remove(rolesToRemove).catch(() => {});
+    }
+
+    await member.roles.add(targetRoleId);
+    return targetRoleId;
+  } catch (error) {
+    console.error("❌ Erro ao atribuir cargo por nível:");
+    console.error(error);
+    return null;
+  }
 }
 
 // =========================
@@ -213,6 +270,13 @@ client.on("messageCreate", async message => {
     message.channel
       .send(`🎉 Parabéns ${message.author}, você subiu para o **nível ${updated.level}**!`)
       .catch(() => {});
+
+    const newRoleId = await updateLevelRole(message.guild, message.author.id, updated.level);
+    if (newRoleId) {
+      message.channel
+        .send(`🏅 ${message.author} também desbloqueou o cargo <@&${newRoleId}> por atividade!`)
+        .catch(() => {});
+    }
   }
 });
 
@@ -365,13 +429,18 @@ client.on("interactionCreate", async interaction => {
       const user = interaction.options.getUser("usuario") || interaction.user;
       const data = getUserData(user.id);
       const proximoNivel = xpForNextLevel(data.level);
+      const cargoAtualId = getRoleIdForLevel(data.level);
+      const cargoTexto = cargoAtualId && !cargoAtualId.startsWith("COLOQUE_")
+        ? `<@&${cargoAtualId}>`
+        : "Nenhum ainda";
 
       const embed = new EmbedBuilder()
         .setTitle(`Perfil de ${user.username}`)
         .setThumbnail(user.displayAvatarURL({ size: 256 }))
         .addFields(
           { name: "Nível", value: `${data.level}`, inline: true },
-          { name: "XP", value: `${data.xp} / ${proximoNivel}`, inline: true }
+          { name: "XP", value: `${data.xp} / ${proximoNivel}`, inline: true },
+          { name: "Cargo por atividade", value: cargoTexto, inline: true }
         )
         .setColor(0x57f287);
 
