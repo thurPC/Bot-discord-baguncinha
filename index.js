@@ -331,7 +331,7 @@ async function tickVoiceXp() {
         const announceChannel = guild.systemChannel;
         if (announceChannel) {
           announceChannel
-            .send(`🎙️ boa cria ${member}, você subiu pro **nível de voz ${updated.voiceLevel}**!`)
+            .send(`🎙️ boa mano ${member}, você subiu pro **nível de voz ${updated.voiceLevel}**!`)
             .catch(() => {});
         }
 
@@ -383,7 +383,6 @@ client.on("interactionCreate", async interaction => {
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Seu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais nessa porra."
-        "⁉️ `/+` — manda sugestão de ideias de comandos ou parecidos."
       );
       console.log("✅ /help respondido");
       return;
