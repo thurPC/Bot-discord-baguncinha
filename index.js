@@ -373,16 +373,17 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "help") {
       await interaction.reply(
-        "**🤖 Bot Baguncinha — os corre que eu faço**\n\n" +
+        "**🤖 Bot Baguncinha — oque posso fazer aq na house**\n\n" +
         "🏓 `/ping` — Confere se eu tô on e rapidão.\n" +
-        "❓ `/help` — Essa mensagem aqui.\n" +
+        "❓ `/help` — Essas mensagem aqui.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
         "👤 `/userinfo` — Perfil completo da pessoa.\n" +
-        "🏠 `/serverinfo` — Os dados da baguncinha.\n" +
+        "🏠 `/serverinfo` — Os dados do baguncinha.\n" +
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Seu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais nessa porra."
+        "⁉️ `/+comandos futuramente` — manda sugestão."
       );
       console.log("✅ /help respondido");
       return;
