@@ -431,15 +431,30 @@ async function footballApiFetch(endpoint, params) {
     url.searchParams.set(key, value);
   });
 
-  const response = await fetch(url, {
-    headers: { "x-apisports-key": FOOTBALL_API_KEY }
-  });
+  // Timeout de 10s — sem isso, se a rede travar, o fetch fica pendurado pra sempre
+  // e a interação do Discord expira sem nenhum log de erro aparecer.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  if (!response.ok) {
-    throw new Error(`API-Football respondeu ${response.status}`);
+  try {
+    const response = await fetch(url, {
+      headers: { "x-apisports-key": FOOTBALL_API_KEY },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`API-Football respondeu ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Tempo esgotado conectando na API-Football (10s)");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response.json();
 }
 
 // Confirma os IDs certos de cada competição e da Seleção (pra não depender só do fallback)
@@ -709,22 +724,22 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "help") {
       await interaction.reply(
-        "**🤖 Bot Baguncinha — oq posso fazer no server**\n\n" +
-        "🏓 `/ping` — Confere se eu tô on e suave.\n" +
-        "❓ `/help` — mostra todos os comandos.\n" +
+        "**🤖 Bot Baguncinha — os corre que eu faço**\n\n" +
+        "🏓 `/ping` — Confere se eu tô on e rapidão.\n" +
+        "❓ `/help` — Essa mensagem aqui.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
         "👤 `/userinfo` — Perfil completo da pessoa.\n" +
         "🏠 `/serverinfo` — Os dados da nossa quebrada.\n" +
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Teu nível e XP no servidor.\n" +
-        "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
-        "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
+        "🏆 `/rank` — Quem tá mandando mais nessa porra.\n" +
+        "📢 `/embed` — Cria um anúncio bonito (staff).\n" +
         "💰 `/carteira` — Vê quantas moedas você tem.\n" +
         "🎁 `/daily` — Recompensa diária de moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
-        "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
-        "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal).\n" +
+        "🎣 `/pescar` — Pesca por moedas (risco de dar zica).\n" +
+        "🕵️ `/roubar` — Tenta roubar moedas de alguém.\n" +
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
@@ -807,7 +822,7 @@ client.on("interactionCreate", async interaction => {
       const deleted = await interaction.channel.bulkDelete(quantidade, true);
 
       await interaction.editReply(
-        `🧹 Pronto, sumi com essas ${deleted.size} mensagem(ns) meu parceiro.`
+        `🧹 Pronto, sumi com ${deleted.size} mensagem(ns) dessa porra.`
       );
       console.log("✅ /clear respondido");
       return;
@@ -821,7 +836,7 @@ client.on("interactionCreate", async interaction => {
       const mensagem = interaction.options.getString("mensagem");
 
       await interaction.reply(
-        `⏰ certo! Te dou um toque em **${minutos} minuto(s)**: "${mensagem}"`
+        `⏰ Fechou! Te dou um toque em **${minutos} minuto(s)**: "${mensagem}"`
       );
 
       setTimeout(() => {
