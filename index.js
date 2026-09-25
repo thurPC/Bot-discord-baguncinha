@@ -17,6 +17,7 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = "1370256381701128192";
 const PORT = process.env.PORT || 10000;
+const FOOTBALL_API_KEY = process.env.API_FOOTBALL_KEY;
 
 // =========================
 // VERIFICAÇÃO
@@ -57,7 +58,12 @@ function getUserData(userId) {
       textLevel: 1,
       voiceXp: 0,
       voiceLevel: 1,
-      lastMessageTimestamp: 0
+      lastMessageTimestamp: 0,
+      coins: 0,
+      lastDaily: 0,
+      lastTrabalhar: 0,
+      lastPescar: 0,
+      lastRoubar: 0
     });
   }
   return xpData.get(userId);
@@ -150,6 +156,36 @@ async function updateLevelRole(guild, userId, level) {
 }
 
 // =========================
+// ECONOMIA — MOEDAS
+// =========================
+const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const TRABALHAR_COOLDOWN_MS = 60 * 60 * 1000;
+const PESCAR_COOLDOWN_MS = 30 * 60 * 1000;
+const ROUBAR_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+
+function formatarMoedas(valor) {
+  return `${valor} 🪙`;
+}
+
+// =========================
+// LOJA
+// =========================
+// Coloque aqui os itens que dá pra comprar com moedas.
+// roleId é opcional — se preencher, o item concede um cargo cosmético ao comprar.
+const SHOP_ITEMS = {
+  destaque: {
+    nome: "Destaque no Perfil",
+    preco: 500,
+    roleId: "COLOQUE_O_ID_DO_CARGO_AQUI" // ex: cargo de cor especial
+  },
+  vip: {
+    nome: "Cargo VIP",
+    preco: 1500,
+    roleId: "COLOQUE_O_ID_DO_CARGO_AQUI"
+  }
+};
+
+// =========================
 // COMANDOS
 // =========================
 const commands = [
@@ -204,7 +240,7 @@ const commands = [
     .addIntegerOption(option =>
       option
         .setName("minutos")
-        .setDescription("Em quantos minutos te avisar?")
+        .setDescription("Em quantos minutos te avisar")
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(1440)
@@ -228,7 +264,104 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("rank")
-    .setDescription("Mostra o ranking de XP do servidor (top 10).")
+    .setDescription("Mostra o ranking de XP do servidor (top 10)."),
+
+  new SlashCommandBuilder()
+    .setName("embed")
+    .setDescription("Cria um anúncio bonito em embed (staff).")
+    .addStringOption(option =>
+      option.setName("titulo").setDescription("Título do embed").setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("descricao")
+        .setDescription("Texto do embed (use \\n pra quebrar linha)")
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("cor")
+        .setDescription("Cor em hexadecimal, ex: #ff0000")
+        .setRequired(false)
+    )
+    .addChannelOption(option =>
+      option
+        .setName("canal")
+        .setDescription("Canal onde vai ser postado (padrão: este canal)")
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName("carteira")
+    .setDescription("Mostra quantas moedas você (ou alguém) tem.")
+    .addUserOption(option =>
+      option.setName("usuario").setDescription("Usuário para ver a carteira").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("daily")
+    .setDescription("Resgata sua recompensa diária de moedas."),
+
+  new SlashCommandBuilder()
+    .setName("trabalhar")
+    .setDescription("Faz um trampo e ganha uma moedinha certa."),
+
+  new SlashCommandBuilder()
+    .setName("pescar")
+    .setDescription("Vai pescar e pode voltar com uma grana (ou não)."),
+
+  new SlashCommandBuilder()
+    .setName("roubar")
+    .setDescription("Tenta roubar moedas de alguém. Corre o risco de dar errado.")
+    .addUserOption(option =>
+      option.setName("usuario").setDescription("Quem você vai tentar roubar").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("loja")
+    .setDescription("Mostra os itens disponíveis pra comprar com moedas."),
+
+  new SlashCommandBuilder()
+    .setName("comprar")
+    .setDescription("Compra um item da loja.")
+    .addStringOption(option =>
+      option
+        .setName("item")
+        .setDescription("Item que você quer comprar")
+        .setRequired(true)
+        .addChoices(
+          ...Object.entries(SHOP_ITEMS).map(([id, item]) => ({
+            name: `${item.nome} (${item.preco} 🪙)`,
+            value: id
+          }))
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("apostar")
+    .setDescription("Aposta suas moedas em cara ou coroa.")
+    .addIntegerOption(option =>
+      option
+        .setName("quantidade")
+        .setDescription("Quantas moedas você quer apostar")
+        .setRequired(true)
+        .setMinValue(10)
+    )
+    .addStringOption(option =>
+      option
+        .setName("escolha")
+        .setDescription("Cara ou coroa")
+        .setRequired(true)
+        .addChoices(
+          { name: "Cara", value: "cara" },
+          { name: "Coroa", value: "coroa" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("jogos")
+    .setDescription("Mostra os próximos jogos do Brasileirão e da Seleção.")
 
 ].map(command => command.toJSON());
 
@@ -261,9 +394,175 @@ async function registerCommands() {
 }
 
 // =========================
+// AVISOS DE FUTEBOL (BRASILEIRÃO + SELEÇÃO)
+// =========================
+// Usa a API-Football (v3.football.api-sports.io). Plano grátis: 100 requisições/dia.
+// Precisa criar conta em https://dashboard.api-football.com e colocar a chave
+// na variável de ambiente API_FOOTBALL_KEY no Render.
+const FOOTBALL_API_BASE = "https://v3.football.api-sports.io";
+
+// IDs "de fallback" (mais usados publicamente). O bot tenta confirmar/corrigir
+// esses IDs sozinho ao iniciar, então não precisa mexer aqui normalmente.
+let BRASILEIRAO_LEAGUE_ID = 71; // Brasileirão Série A
+let SELECAO_TEAM_ID = 6;        // Seleção Brasileira
+
+let futebolChannelId = null;
+const FOOTBALL_CHECK_INTERVAL_MS = 60 * 60 * 1000; // confere de hora em hora
+const avisosEnviados = new Set();   // fixture.id que já recebeu o aviso de "tá quase começando"
+const resultadosEnviados = new Set(); // fixture.id que já recebeu o resultado final
+
+async function footballApiFetch(endpoint, params) {
+  const url = new URL(`${FOOTBALL_API_BASE}${endpoint}`);
+  Object.entries(params || {}).forEach(([key, value]) => {
+    url.searchParams.set(key, value);
+  });
+
+  const response = await fetch(url, {
+    headers: { "x-apisports-key": FOOTBALL_API_KEY }
+  });
+
+  if (!response.ok) {
+    throw new Error(`API-Football respondeu ${response.status}`);
+  }
+
+  return response.json();
+}
+
+// Confirma os IDs certos do Brasileirão e da Seleção (pra não depender só do fallback)
+async function descobrirIdsFutebol() {
+  if (!FOOTBALL_API_KEY) return;
+
+  try {
+    const ligas = await footballApiFetch("/leagues", { name: "Serie A", country: "Brazil" });
+    if (ligas?.response?.length) {
+      BRASILEIRAO_LEAGUE_ID = ligas.response[0].league.id;
+    }
+  } catch (error) {
+    console.error("❌ Erro ao descobrir liga do Brasileirão:", error.message);
+  }
+
+  try {
+    const times = await footballApiFetch("/teams", { name: "Brazil" });
+    const selecao = times?.response?.find(t => t.team.national === true);
+    if (selecao) {
+      SELECAO_TEAM_ID = selecao.team.id;
+    }
+  } catch (error) {
+    console.error("❌ Erro ao descobrir time da Seleção:", error.message);
+  }
+
+  console.log(`⚽ Liga Brasileirão: ${BRASILEIRAO_LEAGUE_ID} | Seleção: ${SELECAO_TEAM_ID}`);
+}
+
+// Acha o canal #futebol, ou cria se não existir
+async function ensureFutebolChannel(guild) {
+  let channel = guild.channels.cache.find(
+    c => c.name === "futebol" && c.type === ChannelType.GuildText
+  );
+
+  if (!channel) {
+    try {
+      channel = await guild.channels.create({
+        name: "futebol",
+        type: ChannelType.GuildText,
+        topic: "⚽ Avisos automáticos do Brasileirão e da Seleção Brasileira"
+      });
+      console.log("✅ Canal #futebol criado.");
+    } catch (error) {
+      console.error("❌ Não consegui criar o canal #futebol (confere a permissão 'Gerenciar Canais' do bot):");
+      console.error(error);
+      return null;
+    }
+  }
+
+  return channel;
+}
+
+function formatarHorarioJogo(dataISO) {
+  const timestamp = Math.floor(new Date(dataISO).getTime() / 1000);
+  return `<t:${timestamp}:F> (<t:${timestamp}:R>)`;
+}
+
+async function checkFootball() {
+  if (!FOOTBALL_API_KEY || !futebolChannelId) return;
+
+  const channel = client.channels.cache.get(futebolChannelId);
+  if (!channel) return;
+
+  const hoje = new Date().toISOString().split("T")[0];
+  const ano = new Date().getFullYear();
+
+  try {
+    const [brasileirao, selecao] = await Promise.all([
+      footballApiFetch("/fixtures", { league: BRASILEIRAO_LEAGUE_ID, season: ano, date: hoje }),
+      footballApiFetch("/fixtures", { team: SELECAO_TEAM_ID, date: hoje })
+    ]);
+
+    const fixtures = [
+      ...(brasileirao?.response || []),
+      ...(selecao?.response || [])
+    ];
+
+    const now = Date.now();
+
+    for (const jogo of fixtures) {
+      const fixtureId = jogo.fixture.id;
+      const status = jogo.fixture.status.short;
+      const kickoff = new Date(jogo.fixture.date).getTime();
+      const minutosParaComecar = (kickoff - now) / 60000;
+
+      const mandante = jogo.teams.home.name;
+      const visitante = jogo.teams.away.name;
+      const competicao = jogo.league.name;
+
+      // Aviso de "tá quase começando"
+      if (
+        status === "NS" &&
+        minutosParaComecar > 0 &&
+        minutosParaComecar <= 120 &&
+        !avisosEnviados.has(fixtureId)
+      ) {
+        avisosEnviados.add(fixtureId);
+
+        const embed = new EmbedBuilder()
+          .setTitle(`⚽ ${mandante} x ${visitante}`)
+          .setDescription(
+            `Partida chegando, cria! Se liga:\n\n` +
+            `🏆 ${competicao}\n` +
+            `🕐 ${formatarHorarioJogo(jogo.fixture.date)}`
+          )
+          .setColor(0x2ecc71);
+
+        channel.send({ embeds: [embed] }).catch(() => {});
+      }
+
+      // Resultado final
+      if (
+        ["FT", "AET", "PEN"].includes(status) &&
+        !resultadosEnviados.has(fixtureId)
+      ) {
+        resultadosEnviados.add(fixtureId);
+
+        const golsMandante = jogo.goals.home;
+        const golsVisitante = jogo.goals.away;
+
+        const embed = new EmbedBuilder()
+          .setTitle(`🏁 Acabou o jogo — ${mandante} ${golsMandante} x ${golsVisitante} ${visitante}`)
+          .setDescription(`🏆 ${competicao}`)
+          .setColor(0xe67e22);
+
+        channel.send({ embeds: [embed] }).catch(() => {});
+      }
+    }
+  } catch (error) {
+    console.error("❌ Erro ao checar jogos de futebol:", error.message);
+  }
+}
+
+// =========================
 // BOT CONECTADO
 // =========================
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log("=================================");
   console.log(`🤖 Bot conectado como ${client.user.tag}`);
   console.log(`🆔 ID: ${client.user.id}`);
@@ -272,6 +571,21 @@ client.once("ready", () => {
 
   setInterval(tickVoiceXp, VOICE_XP_INTERVAL_MS);
   console.log(`🎙️ Rastreamento de XP por voz ativado (a cada ${VOICE_XP_INTERVAL_MS / 60000} min)`);
+
+  if (FOOTBALL_API_KEY) {
+    const guild = client.guilds.cache.get(GUILD_ID);
+    if (guild) {
+      const canal = await ensureFutebolChannel(guild);
+      if (canal) futebolChannelId = canal.id;
+    }
+
+    await descobrirIdsFutebol();
+    setInterval(checkFootball, FOOTBALL_CHECK_INTERVAL_MS);
+    checkFootball(); // já confere uma vez assim que liga
+    console.log(`⚽ Avisos de futebol ativados (a cada ${FOOTBALL_CHECK_INTERVAL_MS / 60000} min)`);
+  } else {
+    console.log("⚠️ API_FOOTBALL_KEY não configurada — avisos de futebol desativados.");
+  }
 });
 
 // =========================
@@ -293,7 +607,7 @@ client.on("messageCreate", async message => {
 
   if (leveledUp) {
     message.channel
-      .send(`💬 boa cria ${message.author}, você subiu pro **nível de texto ${updated.textLevel}**!`)
+      .send(`💬 Salve ${message.author}, você subiu pro **nível de texto ${updated.textLevel}**!`)
       .catch(() => {});
 
     const newRoleId = await updateLevelRole(message.guild, message.author.id, getTotalLevel(updated));
@@ -310,7 +624,7 @@ client.on("messageCreate", async message => {
 // =========================
 // A cada X minutos, todo mundo que está conectado em um canal de voz
 // (menos o canal AFK e bots) ganha XP de voz. É separado do XP de texto.
-const VOICE_XP_INTERVAL_MS = 7 * 50 * 1000; // a cada 5 minutos
+const VOICE_XP_INTERVAL_MS = 5 * 60 * 1000; // a cada 5 minutos
 
 async function tickVoiceXp() {
   const guild = client.guilds.cache.get(GUILD_ID);
@@ -331,14 +645,14 @@ async function tickVoiceXp() {
         const announceChannel = guild.systemChannel;
         if (announceChannel) {
           announceChannel
-            .send(`🎙️ boa mano ${member}, você subiu pro **nível de voz ${updated.voiceLevel}**!`)
+            .send(`🎙️ Salve ${member}, você subiu pro **nível de voz ${updated.voiceLevel}**!`)
             .catch(() => {});
         }
 
         const newRoleId = await updateLevelRole(guild, member.id, getTotalLevel(updated));
         if (newRoleId && announceChannel) {
           announceChannel
-            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> na marra krl!`)
+            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> na correria!`)
             .catch(() => {});
         }
       }
@@ -373,16 +687,26 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "help") {
       await interaction.reply(
-        "**🤖 Bot Baguncinha — oque posso fazer aq na house?**\n\n" +
+        "**🤖 Bot Baguncinha — os corre que eu faço**\n\n" +
         "🏓 `/ping` — Confere se eu tô on e rapidão.\n" +
-        "❓ `/help` — Essas mensagem aqui.\n" +
+        "❓ `/help` — Essa mensagem aqui.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
         "👤 `/userinfo` — Perfil completo da pessoa.\n" +
-        "🏠 `/serverinfo` — Os dados do baguncinha.\n" +
+        "🏠 `/serverinfo` — Os dados da nossa quebrada.\n" +
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
-        "📊 `/perfil` — Seu nível e XP no servidor.\n" +
-        "🏆 `/rank` — Quem tá mais ativo no server."
+        "📊 `/perfil` — Teu nível e XP no servidor.\n" +
+        "🏆 `/rank` — Quem tá mandando mais nessa porra.\n" +
+        "📢 `/embed` — Cria um anúncio bonito (staff).\n" +
+        "💰 `/carteira` — Vê quantas moedas você tem.\n" +
+        "🎁 `/daily` — Recompensa diária de moedas.\n" +
+        "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
+        "🎣 `/pescar` — Pesca por moedas (risco de dar zica).\n" +
+        "🕵️ `/roubar` — Tenta roubar moedas de alguém.\n" +
+        "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
+        "🛍️ `/comprar` — Compra um item da loja.\n" +
+        "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
+        "⚽ `/jogos` — Próximos jogos do Brasileirão e da Seleção."
       );
       console.log("✅ /help respondido");
       return;
@@ -435,7 +759,7 @@ client.on("interactionCreate", async interaction => {
       const guild = interaction.guild;
 
       const embed = new EmbedBuilder()
-        .setTitle(`Dados do baguncinha — ${guild.name}`)
+        .setTitle(`Dados da quebrada — ${guild.name}`)
         .setThumbnail(guild.iconURL({ size: 256 }) || null)
         .addFields(
           { name: "Membros", value: `${guild.memberCount}`, inline: true },
@@ -564,11 +888,370 @@ client.on("interactionCreate", async interaction => {
     }
 
     // =========================
+    // EMBED (STAFF)
+    // =========================
+    if (interaction.commandName === "embed") {
+      const titulo = interaction.options.getString("titulo");
+      const descricao = interaction.options.getString("descricao").replace(/\\n/g, "\n");
+      const corInput = interaction.options.getString("cor");
+      const canal = interaction.options.getChannel("canal") || interaction.channel;
+
+      let cor = 0x5865f2;
+      if (corInput) {
+        const hex = corInput.replace("#", "");
+        if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+          cor = parseInt(hex, 16);
+        }
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(titulo)
+        .setDescription(descricao)
+        .setColor(cor)
+        .setFooter({ text: `Postado por ${interaction.user.username}` });
+
+      try {
+        await canal.send({ embeds: [embed] });
+        await interaction.reply({ content: `✅ Anúncio postado em ${canal}.`, ephemeral: true });
+      } catch (error) {
+        console.error("❌ Erro ao postar embed:", error);
+        await interaction.reply({
+          content: "❌ Não consegui postar nesse canal. Confere se eu tenho permissão lá.",
+          ephemeral: true
+        });
+      }
+      console.log("✅ /embed respondido");
+      return;
+    }
+
+    // =========================
+    // CARTEIRA
+    // =========================
+    if (interaction.commandName === "carteira") {
+      const user = interaction.options.getUser("usuario") || interaction.user;
+      const data = getUserData(user.id);
+
+      await interaction.reply(
+        `💰 A carteira de **${user.username}** tá com ${formatarMoedas(data.coins)}.`
+      );
+      console.log("✅ /carteira respondido");
+      return;
+    }
+
+    // =========================
+    // DAILY
+    // =========================
+    if (interaction.commandName === "daily") {
+      const data = getUserData(interaction.user.id);
+      const now = Date.now();
+
+      if (now - data.lastDaily < DAILY_COOLDOWN_MS) {
+        const restante = DAILY_COOLDOWN_MS - (now - data.lastDaily);
+        const horas = Math.ceil(restante / (60 * 60 * 1000));
+        await interaction.reply({
+          content: `⏳ Você já pegou seu daily. Volta em ~${horas}h.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const ganho = Math.floor(Math.random() * 151) + 100; // 100 a 250
+      data.coins += ganho;
+      data.lastDaily = now;
+
+      await interaction.reply(`🎁 Você resgatou seu daily e ganhou ${formatarMoedas(ganho)}!`);
+      console.log("✅ /daily respondido");
+      return;
+    }
+
+    // =========================
+    // TRABALHAR
+    // =========================
+    if (interaction.commandName === "trabalhar") {
+      const data = getUserData(interaction.user.id);
+      const now = Date.now();
+
+      if (now - data.lastTrabalhar < TRABALHAR_COOLDOWN_MS) {
+        const restante = TRABALHAR_COOLDOWN_MS - (now - data.lastTrabalhar);
+        const minutos = Math.ceil(restante / (60 * 1000));
+        await interaction.reply({
+          content: `⏳ Você já trabalhou hoje. Volta em ~${minutos} min.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const TRAMPOS = [
+        "entregou uns panfleto",
+        "lavou uns carro na rua",
+        "ajudou a organizar o mercado",
+        "fez um freela de design",
+        "vendeu uns doce na praça",
+        "trabalhou de flanelinha"
+      ];
+      const trampo = TRAMPOS[Math.floor(Math.random() * TRAMPOS.length)];
+      const ganho = Math.floor(Math.random() * 81) + 50; // 50 a 130
+
+      data.coins += ganho;
+      data.lastTrabalhar = now;
+
+      await interaction.reply(`💼 Você ${trampo} e faturou ${formatarMoedas(ganho)}.`);
+      console.log("✅ /trabalhar respondido");
+      return;
+    }
+
+    // =========================
+    // PESCAR
+    // =========================
+    if (interaction.commandName === "pescar") {
+      const data = getUserData(interaction.user.id);
+      const now = Date.now();
+
+      if (now - data.lastPescar < PESCAR_COOLDOWN_MS) {
+        const restante = PESCAR_COOLDOWN_MS - (now - data.lastPescar);
+        const minutos = Math.ceil(restante / (60 * 1000));
+        await interaction.reply({
+          content: `⏳ Sua vara ainda tá descansando. Volta em ~${minutos} min.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      data.lastPescar = now;
+
+      const deuNada = Math.random() < 0.25; // 25% de chance de não pegar nada
+
+      if (deuNada) {
+        await interaction.reply("🎣 Você ficou horas na beira do rio e não fisgou nada. Sorte no próximo.");
+        console.log("✅ /pescar respondido (nada)");
+        return;
+      }
+
+      const ganho = Math.floor(Math.random() * 91) + 20; // 20 a 110
+      data.coins += ganho;
+
+      await interaction.reply(`🎣 Fisgou um peixe daora e vendeu por ${formatarMoedas(ganho)}!`);
+      console.log("✅ /pescar respondido");
+      return;
+    }
+
+    // =========================
+    // ROUBAR
+    // =========================
+    if (interaction.commandName === "roubar") {
+      const alvo = interaction.options.getUser("usuario");
+
+      if (alvo.id === interaction.user.id) {
+        await interaction.reply({ content: "❌ Não dá pra roubar de si mesmo, cria.", ephemeral: true });
+        return;
+      }
+      if (alvo.bot) {
+        await interaction.reply({ content: "❌ Bot não anda com dinheiro, esquece.", ephemeral: true });
+        return;
+      }
+
+      const ladrao = getUserData(interaction.user.id);
+      const vitima = getUserData(alvo.id);
+      const now = Date.now();
+
+      if (now - ladrao.lastRoubar < ROUBAR_COOLDOWN_MS) {
+        const restante = ROUBAR_COOLDOWN_MS - (now - ladrao.lastRoubar);
+        const minutos = Math.ceil(restante / (60 * 1000));
+        await interaction.reply({
+          content: `⏳ Tá muito na cara, espera uns ~${minutos} min antes de tentar de novo.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      if (vitima.coins < 50) {
+        await interaction.reply({
+          content: `❌ ${alvo.username} tá quebrado, não vale nem a pena tentar.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      ladrao.lastRoubar = now;
+
+      const sucesso = Math.random() < 0.4; // 40% de chance de dar certo
+
+      if (sucesso) {
+        const percentual = Math.random() * 0.2 + 0.1; // rouba 10% a 30%
+        const roubado = Math.max(1, Math.floor(vitima.coins * percentual));
+
+        vitima.coins -= roubado;
+        ladrao.coins += roubado;
+
+        await interaction.reply(
+          `🕵️ Deu certo! Você roubou ${formatarMoedas(roubado)} de ${alvo.username}.`
+        );
+      } else {
+        const multa = Math.floor(Math.random() * 51) + 30; // perde 30 a 80
+        ladrao.coins = Math.max(0, ladrao.coins - multa);
+
+        await interaction.reply(
+          `🚨 Foi pego tentando roubar ${alvo.username} e pagou uma multa de ${formatarMoedas(multa)}.`
+        );
+      }
+
+      console.log("✅ /roubar respondido");
+      return;
+    }
+
+    // =========================
+    // LOJA
+    // =========================
+    if (interaction.commandName === "loja") {
+      const linhas = Object.entries(SHOP_ITEMS).map(
+        ([id, item]) => `**${item.nome}** — ${formatarMoedas(item.preco)}\nUse \`/comprar item:${item.nome}\``
+      );
+
+      const embed = new EmbedBuilder()
+        .setTitle("🛒 Loja da quebrada")
+        .setDescription(linhas.join("\n\n"))
+        .setColor(0x9b59b6);
+
+      await interaction.reply({ embeds: [embed] });
+      console.log("✅ /loja respondido");
+      return;
+    }
+
+    // =========================
+    // COMPRAR
+    // =========================
+    if (interaction.commandName === "comprar") {
+      const itemId = interaction.options.getString("item");
+      const item = SHOP_ITEMS[itemId];
+
+      if (!item) {
+        await interaction.reply({ content: "❌ Esse item não existe.", ephemeral: true });
+        return;
+      }
+
+      const data = getUserData(interaction.user.id);
+
+      if (data.coins < item.preco) {
+        await interaction.reply({
+          content: `❌ Faltam ${formatarMoedas(item.preco - data.coins)} pra comprar **${item.nome}**.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      data.coins -= item.preco;
+
+      if (item.roleId && !item.roleId.startsWith("COLOQUE_")) {
+        try {
+          const member = await interaction.guild.members.fetch(interaction.user.id);
+          await member.roles.add(item.roleId);
+        } catch (error) {
+          console.error("❌ Erro ao dar cargo da loja:", error);
+        }
+      }
+
+      await interaction.reply(`✅ Você comprou **${item.nome}**! Aproveita.`);
+      console.log("✅ /comprar respondido");
+      return;
+    }
+
+    // =========================
+    // APOSTAR
+    // =========================
+    if (interaction.commandName === "apostar") {
+      const quantidade = interaction.options.getInteger("quantidade");
+      const escolha = interaction.options.getString("escolha");
+      const data = getUserData(interaction.user.id);
+
+      if (data.coins < quantidade) {
+        await interaction.reply({
+          content: `❌ Você não tem ${formatarMoedas(quantidade)} pra apostar. Sua carteira: ${formatarMoedas(data.coins)}.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const resultado = Math.random() < 0.5 ? "cara" : "coroa";
+      const ganhou = resultado === escolha;
+
+      if (ganhou) {
+        data.coins += quantidade;
+        await interaction.reply(
+          `🪙 Deu **${resultado}**! Você dobrou a aposta e ganhou ${formatarMoedas(quantidade)}.`
+        );
+      } else {
+        data.coins -= quantidade;
+        await interaction.reply(
+          `🪙 Deu **${resultado}**... você perdeu ${formatarMoedas(quantidade)}. Próxima.`
+        );
+      }
+
+      console.log("✅ /apostar respondido");
+      return;
+    }
+
+    // =========================
+    // JOGOS (BRASILEIRÃO + SELEÇÃO)
+    // =========================
+    if (interaction.commandName === "jogos") {
+      if (!FOOTBALL_API_KEY) {
+        await interaction.reply({
+          content: "❌ Os avisos de futebol ainda não tão configurados (falta a chave da API).",
+          ephemeral: true
+        });
+        return;
+      }
+
+      await interaction.deferReply();
+
+      try {
+        const ano = new Date().getFullYear();
+
+        const [brasileirao, selecao] = await Promise.all([
+          footballApiFetch("/fixtures", { league: BRASILEIRAO_LEAGUE_ID, season: ano, next: 5 }),
+          footballApiFetch("/fixtures", { team: SELECAO_TEAM_ID, next: 3 })
+        ]);
+
+        const fixtures = [
+          ...(brasileirao?.response || []),
+          ...(selecao?.response || [])
+        ].sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
+
+        if (fixtures.length === 0) {
+          await interaction.editReply("Não achei nenhum jogo marcado por enquanto.");
+          return;
+        }
+
+        const linhas = fixtures
+          .slice(0, 8)
+          .map(jogo => {
+            return (
+              `⚽ **${jogo.teams.home.name} x ${jogo.teams.away.name}**\n` +
+              `　　🏆 ${jogo.league.name} — 🕐 ${formatarHorarioJogo(jogo.fixture.date)}`
+            );
+          });
+
+        const embed = new EmbedBuilder()
+          .setTitle("📅 Próximos jogos")
+          .setDescription(linhas.join("\n\n"))
+          .setColor(0x2ecc71);
+
+        await interaction.editReply({ embeds: [embed] });
+      } catch (error) {
+        console.error("❌ Erro ao buscar jogos:", error);
+        await interaction.editReply("❌ Deu ruim buscando os jogos. Tenta de novo mais tarde.");
+      }
+
+      console.log("✅ /jogos respondido");
+      return;
+    }
+
+    // =========================
     // DESCONHECIDO
     // =========================
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: "❌ Esse comando aí não existe, porra kkkkk.",
+        content: "❌ Esse comando aí não existe, porra.",
         ephemeral: true
       });
     }
@@ -580,7 +1263,7 @@ client.on("interactionCreate", async interaction => {
     try {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
-          content: "❌ Deu ruim aqui, em fi. Tenta de novo.",
+          content: "❌ Deu ruim aqui, porra. Tenta de novo.",
           ephemeral: true
         });
       } else {
