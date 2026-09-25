@@ -268,7 +268,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("embed")
-    .setDescription("Cria um anúncio bonito em embed (staff).")
+    .setDescription("Cria um anúncio daora em embed (staff).")
     .addStringOption(option =>
       option.setName("titulo").setDescription("Título do embed").setRequired(true)
     )
@@ -305,7 +305,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("trabalhar")
-    .setDescription("Faz um trampo e ganha uma moedinha certa."),
+    .setDescription("Faz um trampo e ganha umas moedinhas."),
 
   new SlashCommandBuilder()
     .setName("pescar")
@@ -407,7 +407,7 @@ let BRASILEIRAO_LEAGUE_ID = 71; // Brasileirão Série A
 let SELECAO_TEAM_ID = 6;        // Seleção Brasileira
 
 let futebolChannelId = null;
-const FOOTBALL_CHECK_INTERVAL_MS = 60 * 60 * 1000; // confere de hora em hora
+const FOOTBALL_CHECK_INTERVAL_MS = 10 * 60 * 1000; // confere de hora em hora
 const avisosEnviados = new Set();   // fixture.id que já recebeu o aviso de "tá quase começando"
 const resultadosEnviados = new Set(); // fixture.id que já recebeu o resultado final
 
