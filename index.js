@@ -174,14 +174,14 @@ function formatarMoedas(valor) {
 // roleId é opcional — se preencher, o item concede um cargo cosmético ao comprar.
 const SHOP_ITEMS = {
   destaque: {
-    nome: "Destaque no Perfil",
-    preco: 500,
-    roleId: "COLOQUE_O_ID_DO_CARGO_AQUI" // ex: cargo de cor especial
+    nome: "membro VIP",
+    preco: 3500,
+    roleId: "1371849692974944357" // ex: cargo de cor especial
   },
   vip: {
-    nome: "Cargo VIP",
-    preco: 1500,
-    roleId: "COLOQUE_O_ID_DO_CARGO_AQUI"
+    nome: "Cargo pirata🏴‍☠️",
+    preco: 4500,
+    roleId: "1530739542733230251"
   }
 };
 
