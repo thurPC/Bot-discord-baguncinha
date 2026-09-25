@@ -240,7 +240,7 @@ const commands = [
     .addIntegerOption(option =>
       option
         .setName("minutos")
-        .setDescription("Em quantos minutos te avisar")
+        .setDescription("Em quantos minutos te avisar?")
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(1440)
@@ -248,7 +248,7 @@ const commands = [
     .addStringOption(option =>
       option
         .setName("mensagem")
-        .setDescription("O que você quer ser lembrado")
+        .setDescription("O que você quer ser lembrado?")
         .setRequired(true)
     ),
 
@@ -344,7 +344,7 @@ const commands = [
     .addIntegerOption(option =>
       option
         .setName("quantidade")
-        .setDescription("Quantas moedas você quer apostar")
+        .setDescription("Quantas moedas você quer apostar?")
         .setRequired(true)
         .setMinValue(10)
     )
