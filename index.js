@@ -9,6 +9,8 @@ const {
   ChannelType
 } = require("discord.js");
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 
 // =========================
 // CONFIGURAÇÃO
@@ -50,6 +52,41 @@ const client = new Client({
 // XP de texto e de voz são contados separadamente (níveis independentes),
 // mas os dois somam pro "nível total", que é o que libera os cargos por atividade.
 const xpData = new Map(); // key: userId, value: { textXp, textLevel, voiceXp, voiceLevel, lastMessageTimestamp }
+
+// =========================
+// PERSISTÊNCIA EM JSON
+// =========================
+// ⚠️ O disco do Render é temporário: sobrevive a "dormir e acordar", mas
+// some quando você faz um novo deploy (o container é recriado do zero).
+const DATA_FILE = path.join(__dirname, "database.json");
+
+function carregarDados() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const bruto = fs.readFileSync(DATA_FILE, "utf-8");
+      const objeto = JSON.parse(bruto);
+
+      for (const [userId, dadosUsuario] of Object.entries(objeto)) {
+        xpData.set(userId, dadosUsuario);
+      }
+
+      console.log(`💾 Banco de dados carregado (${xpData.size} usuário(s)).`);
+    } else {
+      console.log("💾 Nenhum banco de dados encontrado, começando do zero.");
+    }
+  } catch (error) {
+    console.error("❌ Erro ao carregar banco de dados:", error);
+  }
+}
+
+function salvarDados() {
+  try {
+    const objeto = Object.fromEntries(xpData);
+    fs.writeFileSync(DATA_FILE, JSON.stringify(objeto, null, 2));
+  } catch (error) {
+    console.error("❌ Erro ao salvar banco de dados:", error);
+  }
+}
 
 function getUserData(userId) {
   if (!xpData.has(userId)) {
@@ -724,22 +761,22 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "help") {
       await interaction.reply(
-        "**🤖 Bot Baguncinha — os corre que eu faço**\n\n" +
-        "🏓 `/ping` — Confere se eu tô on e rapidão.\n" +
-        "❓ `/help` — Essa mensagem aqui.\n" +
+        "**🤖 Bot Baguncinha — oq posso fazer no server**\n\n" +
+        "🏓 `/ping` — Confere se eu tô on e suave.\n" +
+        "❓ `/help` — mostra todos os comandos.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
         "👤 `/userinfo` — Perfil completo da pessoa.\n" +
         "🏠 `/serverinfo` — Os dados da nossa quebrada.\n" +
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Teu nível e XP no servidor.\n" +
-        "🏆 `/rank` — Quem tá mandando mais nessa porra.\n" +
-        "📢 `/embed` — Cria um anúncio bonito (staff).\n" +
+        "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
+        "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
         "💰 `/carteira` — Vê quantas moedas você tem.\n" +
         "🎁 `/daily` — Recompensa diária de moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
-        "🎣 `/pescar` — Pesca por moedas (risco de dar zica).\n" +
-        "🕵️ `/roubar` — Tenta roubar moedas de alguém.\n" +
+        "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
+        "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal).\n" +
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
@@ -822,7 +859,7 @@ client.on("interactionCreate", async interaction => {
       const deleted = await interaction.channel.bulkDelete(quantidade, true);
 
       await interaction.editReply(
-        `🧹 Pronto, sumi com ${deleted.size} mensagem(ns) dessa porra.`
+        `🧹 Pronto, sumi com essas ${deleted.size} mensagem(ns) meu parceiro.`
       );
       console.log("✅ /clear respondido");
       return;
@@ -836,7 +873,7 @@ client.on("interactionCreate", async interaction => {
       const mensagem = interaction.options.getString("mensagem");
 
       await interaction.reply(
-        `⏰ Fechou! Te dou um toque em **${minutos} minuto(s)**: "${mensagem}"`
+        `⏰ certo! Te dou um toque em **${minutos} minuto(s)**: "${mensagem}"`
       );
 
       setTimeout(() => {
@@ -1362,6 +1399,8 @@ async function start() {
       return;
     }
 
+    carregarDados();
+
     await registerCommands();
 
     console.log("🔌 Conectando ao Discord...");
@@ -1371,5 +1410,17 @@ async function start() {
     console.error(error);
   }
 }
+
+// Salva automaticamente a cada 2 minutos
+setInterval(salvarDados, 2 * 60 * 1000);
+
+// Salva quando o processo for encerrado (deploy novo, reinício manual, etc.)
+function encerrarComSalvamento() {
+  console.log("💾 Salvando banco de dados antes de encerrar...");
+  salvarDados();
+  process.exit(0);
+}
+process.on("SIGINT", encerrarComSalvamento);
+process.on("SIGTERM", encerrarComSalvamento);
 
 start();
