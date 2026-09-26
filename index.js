@@ -484,23 +484,26 @@ const FOOTBALL_API_BASE = "https://v3.football.api-sports.io";
 const LIGAS_BRASIL = {
   serieA: { id: 71, nome: "Serie A", country: "Brazil" },
   serieB: { id: 72, nome: "Serie B", country: "Brazil" },
-  copaDoBrasil: { id: 73, nome: "Copa do Brazil", country: "Brazil" },
+  copaDoBrasil: { id: 73, nome: "Copa do Brasil", country: "Brazil" },
   libertadores: { id: 13, nome: "Libertadores", country: null },
   sulAmericana: { id: 11, nome: "Sudamericana", country: null }
 };
 let SELECAO_TEAM_ID = 6; // Seleção Brasileira
 
 let futebolChannelId = null;
-// Com 5 competições + Seleção (6 chamadas por checagem), a cada 2h dá 72 chamadas/dia,
-// dentro do limite grátis de 100/dia da API-Football.
-const FOOTBALL_CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000;
+// Com 5 competições + Seleção (6 chamadas por checagem), cada checagem gasta 6
+// requisições. A cada 6h dá 4 checagens/dia = 24 chamadas/dia, deixando bastante
+// folga dentro do limite grátis de 100/dia da API-Football (o resto fica livre
+// pro /jogos e pra descoberta de IDs no início).
+const FOOTBALL_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FOOTBALL_REMINDER_WINDOW_MIN = 150; // cobre com folga o intervalo de checagem
 const avisosEnviados = new Set();   // fixture.id que já recebeu o aviso de "tá quase começando"
 const resultadosEnviados = new Set(); // fixture.id que já recebeu o resultado final
 
-// Cache curto pro /jogos, pra não gastar a cota da API se várias pessoas usarem seguido
+// Cache pro /jogos, pra não gastar a cota da API se várias pessoas usarem seguido.
+// 30 min é de boa porque os próximos jogos não mudam de minuto em minuto.
 let jogosCache = { timestamp: 0, dados: null };
-const JOGOS_CACHE_MS = 10 * 60 * 1000;
+const JOGOS_CACHE_MS = 30 * 60 * 1000;
 
 async function footballApiFetch(endpoint, params) {
   const url = new URL(`${FOOTBALL_API_BASE}${endpoint}`);
@@ -523,7 +526,22 @@ async function footballApiFetch(endpoint, params) {
       throw new Error(`API-Football respondeu ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+
+    // ⚠️ IMPORTANTE: a API-Football quase sempre responde HTTP 200, mesmo quando
+    // tem algum problema (chave errada, endpoint errado pro seu plano, parâmetro
+    // inválido, cota estourada etc). O erro real vem dentro do JSON, no campo
+    // "errors". Antes esse erro era ignorado e o bot tratava como "0 jogos
+    // encontrados" — por isso o /jogos nunca mostrava nada mesmo com jogos rolando.
+    const errosApi = data?.errors;
+    const temErro = errosApi && (Array.isArray(errosApi) ? errosApi.length > 0 : Object.keys(errosApi).length > 0);
+
+    if (temErro) {
+      console.error(`❌ API-Football devolveu erro em ${endpoint} (params: ${JSON.stringify(params)}):`, errosApi);
+      throw new Error(`API-Football: ${JSON.stringify(errosApi)}`);
+    }
+
+    return data;
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error("Tempo esgotado conectando na API-Football (10s)");
@@ -1397,23 +1415,52 @@ client.on("interactionCreate", async interaction => {
           fixtures = jogosCache.dados;
         } else {
           const ano = new Date().getFullYear();
+          const chavesLigas = Object.keys(LIGAS_BRASIL);
 
+          // Usamos allSettled em vez de Promise.all: se UMA competição falhar
+          // (ex: plano grátis não dá acesso a ela), as outras continuam
+          // aparecendo em vez do comando inteiro quebrar e cair no "sem jogos".
           const buscasLigas = Object.values(LIGAS_BRASIL).map(liga =>
             footballApiFetch("/fixtures", { league: liga.id, season: ano, next: 3 })
           );
           const buscaSelecao = footballApiFetch("/fixtures", { team: SELECAO_TEAM_ID, next: 3 });
 
-          const resultados = await Promise.all([...buscasLigas, buscaSelecao]);
+          const resultados = await Promise.allSettled([...buscasLigas, buscaSelecao]);
+
+          // Log de diagnóstico: mostra no console (Render -> Logs) exatamente
+          // quantos jogos cada competição devolveu, ou o erro que ela deu.
+          // Se depois de aplicar essa correção o /jogos continuar vazio,
+          // é só olhar esse log pra ver a causa real (ex: erro de plano/cota
+          // da API-Football, e não mais um bug silencioso do código).
+          resultados.forEach((resultado, index) => {
+            const nomeCompeticao = chavesLigas[index] || "Seleção";
+            if (resultado.status === "fulfilled") {
+              console.log(`⚽ [/jogos] ${nomeCompeticao}: ${resultado.value?.response?.length ?? 0} jogo(s)`);
+            } else {
+              console.error(`⚽ [/jogos] ${nomeCompeticao} falhou:`, resultado.reason?.message || resultado.reason);
+            }
+          });
 
           fixtures = resultados
-            .flatMap(resultado => resultado?.response || [])
+            .filter(resultado => resultado.status === "fulfilled")
+            .flatMap(resultado => resultado.value?.response || [])
             .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
 
-          jogosCache = { timestamp: Date.now(), dados: fixtures };
+          // Se TODAS as buscas falharam e a gente tem um cache antigo (mesmo vencido),
+          // usa ele em vez de mostrar erro/vazio pro usuário.
+          const todasFalharam = resultados.every(r => r.status === "rejected");
+          if (todasFalharam && jogosCache.dados) {
+            fixtures = jogosCache.dados;
+          } else {
+            jogosCache = { timestamp: Date.now(), dados: fixtures };
+          }
         }
 
         if (fixtures.length === 0) {
-          await interaction.editReply("Não achei nenhum jogo marcado por enquanto.");
+          await interaction.editReply(
+            "Não achei nenhum jogo marcado por enquanto.\n" +
+            "-# Se isso persistir, dá uma olhada nos logs do Render: pode ser um erro da API-Football (chave errada, plano sem acesso a essa liga/temporada, ou cota estourada) que agora aparece no console."
+          );
           return;
         }
 
@@ -1518,25 +1565,13 @@ client.on("warn", warning => {
 // =========================
 // LOGIN COM DISCORD — PÁGINA DE INTERESSES
 // =========================
-// Fluxo: a pessoa abre o link do Render, marca o que quer acompanhar,
-// clica em "Continuar com Discord", faz login (OAuth2) e o bot atribui
-// os cargos correspondentes automaticamente.
-//
-// PRECISA CONFIGURAR:
-// 1. No Discord Developer Portal → sua aplicação → OAuth2 → General:
-//    copie o "Client Secret" e coloque no Render como DISCORD_CLIENT_SECRET.
-// 2. Ainda em OAuth2 → Redirects, adicione EXATAMENTE:
-//    <URL do seu serviço no Render>/callback
-//    (ex: https://bot-discord-baguncinha-mo1i.onrender.com/callback)
-// 3. Crie os cargos no servidor e cole os IDs em INTEREST_ROLES abaixo.
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const REDIRECT_URI = `${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}/callback`;
 
-// Cole aqui os IDs dos cargos que cada interesse libera.
 const INTEREST_ROLES = {
-  futebol: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Notificações de Futebol
-  apostas: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Fã de Apostas
-  pirataria: "COLOQUE_O_ID_DO_CARGO_AQUI"  // ex: Pirata Oficial 🏴‍☠️
+  futebol: "COLOQUE_O_ID_DO_CARGO_AQUI",
+  apostas: "COLOQUE_O_ID_DO_CARGO_AQUI",
+  pirataria: "COLOQUE_O_ID_DO_CARGO_AQUI"
 };
 
 const NOMES_INTERESSES = {
@@ -1545,9 +1580,7 @@ const NOMES_INTERESSES = {
   pirataria: "🏴‍☠️ Pirataria"
 };
 
-// Guarda, por alguns minutos, o que a pessoa marcou — entre o clique em
-// "Continuar com Discord" e a volta dela pro /callback depois do login.
-const oauthStates = new Map(); // state -> { interesses: string[], criadoEm: number }
+const oauthStates = new Map();
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 function gerarState() {
@@ -1733,14 +1766,12 @@ function paginaErro(mensagem) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  // Página inicial — onde a pessoa escolhe o que quer acompanhar
   if (url.pathname === "/") {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(paginaInicial());
     return;
   }
 
-  // Manda pro login do Discord, guardando o que a pessoa escolheu
   if (url.pathname === "/login") {
     if (!DISCORD_CLIENT_SECRET) {
       res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
@@ -1766,7 +1797,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Volta do login do Discord — aqui os cargos são atribuídos de verdade
   if (url.pathname === "/callback") {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
@@ -1809,7 +1839,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Qualquer outra rota (o cron job de keep-alive bate aqui também)
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end("🤖 Bot Baguncinha na área, tudo certo!");
 });
@@ -1840,10 +1869,8 @@ async function start() {
   }
 }
 
-// Salva automaticamente a cada 2 minutos
 setInterval(salvarDados, 2 * 60 * 1000);
 
-// Salva quando o processo for encerrado (deploy novo, reinício manual, etc.)
 function encerrarComSalvamento() {
   console.log("💾 Salvando banco de dados antes de encerrar...");
   salvarDados();
