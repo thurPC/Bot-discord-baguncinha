@@ -821,7 +821,8 @@ client.on("interactionCreate", async interaction => {
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
-        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).
+        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).\n" +
+        "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin)."
       );
       console.log("✅ /help respondido");
       return;
@@ -1441,7 +1442,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: "❌ Esse comando aí não existe, animal.",
+        content: "❌ Esse comando aí não existe, porra.",
         ephemeral: true
       });
     }
@@ -1453,7 +1454,7 @@ client.on("interactionCreate", async interaction => {
     try {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
-          content: "❌ Deu ruim aqui, burro. Tenta de novo.",
+          content: "❌ Deu ruim aqui, porra. Tenta de novo.",
           ephemeral: true
         });
       } else {
@@ -1483,13 +1484,302 @@ client.on("warn", warning => {
 });
 
 // =========================
+// LOGIN COM DISCORD — PÁGINA DE INTERESSES
+// =========================
+// Fluxo: a pessoa abre o link do Render, marca o que quer acompanhar,
+// clica em "Continuar com Discord", faz login (OAuth2) e o bot atribui
+// os cargos correspondentes automaticamente.
+//
+// PRECISA CONFIGURAR:
+// 1. No Discord Developer Portal → sua aplicação → OAuth2 → General:
+//    copie o "Client Secret" e coloque no Render como DISCORD_CLIENT_SECRET.
+// 2. Ainda em OAuth2 → Redirects, adicione EXATAMENTE:
+//    <URL do seu serviço no Render>/callback
+//    (ex: https://bot-discord-baguncinha-mo1i.onrender.com/callback)
+// 3. Crie os cargos no servidor e cole os IDs em INTEREST_ROLES abaixo.
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+const REDIRECT_URI = `${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}/callback`;
+
+// Cole aqui os IDs dos cargos que cada interesse libera.
+const INTEREST_ROLES = {
+  futebol: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Notificações de Futebol
+  apostas: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Fã de Apostas
+  pirataria: "COLOQUE_O_ID_DO_CARGO_AQUI"  // ex: Pirata Oficial 🏴‍☠️
+};
+
+const NOMES_INTERESSES = {
+  futebol: "⚽ Futebol",
+  apostas: "🪙 Apostas & Economia",
+  pirataria: "🏴‍☠️ Pirataria"
+};
+
+// Guarda, por alguns minutos, o que a pessoa marcou — entre o clique em
+// "Continuar com Discord" e a volta dela pro /callback depois do login.
+const oauthStates = new Map(); // state -> { interesses: string[], criadoEm: number }
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+function gerarState() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function limparStatesExpirados() {
+  const agora = Date.now();
+  for (const [state, dados] of oauthStates.entries()) {
+    if (agora - dados.criadoEm > OAUTH_STATE_TTL_MS) {
+      oauthStates.delete(state);
+    }
+  }
+}
+
+async function trocarCodePorToken(code) {
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID,
+    client_secret: DISCORD_CLIENT_SECRET,
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: REDIRECT_URI
+  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const response = await fetch("https://discord.com/api/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Discord token endpoint respondeu ${response.status}`);
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function buscarUsuarioDiscord(accessToken) {
+  const response = await fetch("https://discord.com/api/users/@me", {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord /users/@me respondeu ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function paginaHtml(conteudo) {
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot Baguncinha</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f0f14;
+    color: #eee;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  .card {
+    max-width: 480px;
+    width: 100%;
+    background: #17171f;
+    border: 1px solid #26262f;
+    border-radius: 16px;
+    padding: 32px;
+  }
+  h1 { font-size: 1.4rem; margin-top: 0; }
+  p { color: #a8a8b3; line-height: 1.5; }
+  label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #1f1f29;
+    border: 1px solid #2c2c38;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+    cursor: pointer;
+  }
+  label:hover { border-color: #5865f2; }
+  input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; }
+  .interesse-titulo { font-weight: 600; }
+  .interesse-desc { font-size: 0.85rem; color: #a8a8b3; }
+  button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: #5865f2;
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  button:hover { background: #4752c4; }
+  .status { text-align: center; }
+  .emoji { font-size: 2.5rem; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    ${conteudo}
+  </div>
+</body>
+</html>`;
+}
+
+function paginaInicial() {
+  return paginaHtml(`
+    <h1>🤖 Bem-vindo(a) ao Bot Baguncinha</h1>
+    <p>Escolhe o que você quer acompanhar no servidor. A gente já libera o cargo certo pra você receber os avisos.</p>
+    <form action="/login" method="GET">
+      <label>
+        <input type="checkbox" name="interesses" value="futebol">
+        <div>
+          <div class="interesse-titulo">⚽ Futebol</div>
+          <div class="interesse-desc">Avisos de jogos do Brasileirão, Copa do Brasil, Libertadores e Seleção</div>
+        </div>
+      </label>
+      <label>
+        <input type="checkbox" name="interesses" value="apostas">
+        <div>
+          <div class="interesse-titulo">🪙 Apostas &amp; Economia</div>
+          <div class="interesse-desc">Fica ligado nos comandos de moeda, apostas e ranking do servidor</div>
+        </div>
+      </label>
+      <label>
+        <input type="checkbox" name="interesses" value="pirataria">
+        <div>
+          <div class="interesse-titulo">🏴‍☠️ Pirataria</div>
+          <div class="interesse-desc">É só zoeira, mas quem marcar ganha o cargo 🏴‍☠️ kkkkk</div>
+        </div>
+      </label>
+      <button type="submit">Continuar com Discord</button>
+    </form>
+  `);
+}
+
+function paginaSucesso(nomesEscolhidos) {
+  return paginaHtml(`
+    <div class="status">
+      <div class="emoji">✅</div>
+      <h1>Prontinho!</h1>
+      <p>Cargo(s) atualizado(s): <strong>${nomesEscolhidos.join(", ") || "nenhum selecionado"}</strong></p>
+      <p>Pode fechar essa aba e voltar pro Discord.</p>
+    </div>
+  `);
+}
+
+function paginaErro(mensagem) {
+  return paginaHtml(`
+    <div class="status">
+      <div class="emoji">❌</div>
+      <h1>Deu ruim</h1>
+      <p>${mensagem}</p>
+    </div>
+  `);
+}
+
+// =========================
 // SERVIDOR HTTP — RENDER
 // =========================
-const server = http.createServer((req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/plain; charset=utf-8"
-  });
-  res.end("🤖 Bot Baguncinha suave, tudo certo!");
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // Página inicial — onde a pessoa escolhe o que quer acompanhar
+  if (url.pathname === "/") {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(paginaInicial());
+    return;
+  }
+
+  // Manda pro login do Discord, guardando o que a pessoa escolheu
+  if (url.pathname === "/login") {
+    if (!DISCORD_CLIENT_SECRET) {
+      res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(paginaErro("O login com Discord ainda não foi configurado (falta DISCORD_CLIENT_SECRET no Render)."));
+      return;
+    }
+
+    limparStatesExpirados();
+
+    const interesses = url.searchParams.getAll("interesses");
+    const state = gerarState();
+    oauthStates.set(state, { interesses, criadoEm: Date.now() });
+
+    const authorizeUrl = new URL("https://discord.com/api/oauth2/authorize");
+    authorizeUrl.searchParams.set("client_id", CLIENT_ID);
+    authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("scope", "identify");
+    authorizeUrl.searchParams.set("state", state);
+
+    res.writeHead(302, { Location: authorizeUrl.toString() });
+    res.end();
+    return;
+  }
+
+  // Volta do login do Discord — aqui os cargos são atribuídos de verdade
+  if (url.pathname === "/callback") {
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const dadosState = state ? oauthStates.get(state) : null;
+
+    if (!code || !dadosState) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(paginaErro("Link inválido ou expirado. Volta pra página inicial e tenta de novo."));
+      return;
+    }
+
+    oauthStates.delete(state);
+
+    try {
+      const tokenData = await trocarCodePorToken(code);
+      const usuario = await buscarUsuarioDiscord(tokenData.access_token);
+
+      const guild = client.guilds.cache.get(GUILD_ID);
+      if (!guild) throw new Error("Servidor não encontrado pelo bot.");
+
+      const member = await guild.members.fetch(usuario.id);
+
+      const rolesParaAdicionar = dadosState.interesses
+        .map(interesse => INTEREST_ROLES[interesse])
+        .filter(roleId => roleId && !roleId.startsWith("COLOQUE_"));
+
+      if (rolesParaAdicionar.length > 0) {
+        await member.roles.add(rolesParaAdicionar);
+      }
+
+      const nomesEscolhidos = dadosState.interesses.map(i => NOMES_INTERESSES[i] || i);
+
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(paginaSucesso(nomesEscolhidos));
+    } catch (error) {
+      console.error("❌ Erro no callback do OAuth:", error);
+      res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(paginaErro("Algo deu errado atualizando seus cargos. Confere se você já é membro do servidor e tenta de novo."));
+    }
+    return;
+  }
+
+  // Qualquer outra rota (o cron job de keep-alive bate aqui também)
+  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end("🤖 Bot Baguncinha na área, tudo certo!");
 });
 
 server.listen(PORT, "0.0.0.0", () => {
