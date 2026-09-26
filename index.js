@@ -1227,7 +1227,7 @@ client.on("interactionCreate", async interaction => {
         return;
       }
       if (alvo.bot) {
-        await interaction.reply({ content: "❌ Bot não precisa de moeda, esquece.", ephemeral: true });
+        await interaction.reply({ content: "❌ Eu nao preciso de esmola fdp.", ephemeral: true });
         return;
       }
 
