@@ -197,7 +197,7 @@ async function updateLevelRole(guild, userId, level) {
 // =========================
 const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const TRABALHAR_COOLDOWN_MS = 60 * 60 * 1000;
-const PESCAR_COOLDOWN_MS = 30 * 60 * 1000;
+const PESCAR_COOLDOWN_MS = 8 * 60 * 1000;
 const ROUBAR_COOLDOWN_MS = 2 * 60 * 60 * 1000;
 
 function formatarMoedas(valor) {
@@ -353,6 +353,20 @@ const commands = [
     .setDescription("Tenta roubar moedas de alguém. Corre o risco de dar errado.")
     .addUserOption(option =>
       option.setName("usuario").setDescription("Quem você vai tentar roubar").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("doar")
+    .setDescription("Doa uma quantidade de moedas pra outra pessoa.")
+    .addUserOption(option =>
+      option.setName("usuario").setDescription("Quem vai receber as moedas").setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("quantidade")
+        .setDescription("Quantas moedas você quer doar")
+        .setRequired(true)
+        .setMinValue(1)
     ),
 
   new SlashCommandBuilder()
@@ -777,6 +791,7 @@ client.on("interactionCreate", async interaction => {
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
         "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
         "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal).\n" +
+        "🤝 `/doar` — Doa moedas pra outra pessoa.\n" +
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
@@ -1087,7 +1102,7 @@ client.on("interactionCreate", async interaction => {
         await interaction.reply({
           content: `⏳ Sua vara ainda tá descansando. Volta em ~${minutos} min.`,
           ephemeral: true
-        });
+        }); // agora com cooldown de 8 min
         return;
       }
 
@@ -1170,6 +1185,44 @@ client.on("interactionCreate", async interaction => {
       }
 
       console.log("✅ /roubar respondido");
+      return;
+    }
+
+    // =========================
+    // DOAR
+    // =========================
+    if (interaction.commandName === "doar") {
+      const alvo = interaction.options.getUser("usuario");
+      const quantidade = interaction.options.getInteger("quantidade");
+
+      if (alvo.id === interaction.user.id) {
+        await interaction.reply({ content: "❌ Não dá pra doar pra si mesmo, cria.", ephemeral: true });
+        return;
+      }
+      if (alvo.bot) {
+        await interaction.reply({ content: "❌ Bot não precisa de moeda, esquece.", ephemeral: true });
+        return;
+      }
+
+      const doador = getUserData(interaction.user.id);
+
+      if (doador.coins < quantidade) {
+        await interaction.reply({
+          content: `❌ Você não tem ${formatarMoedas(quantidade)} pra doar. Sua carteira: ${formatarMoedas(doador.coins)}.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const recebedor = getUserData(alvo.id);
+
+      doador.coins -= quantidade;
+      recebedor.coins += quantidade;
+
+      await interaction.reply(
+        `🤝 Você doou ${formatarMoedas(quantidade)} pra **${alvo.username}**. Bonito gesto.`
+      );
+      console.log("✅ /doar respondido");
       return;
     }
 
