@@ -6,7 +6,16 @@ const {
   SlashCommandBuilder,
   EmbedBuilder,
   PermissionFlagsBits,
-  ChannelType
+  ChannelType,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ChannelSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  Partials
 } = require("discord.js");
 const http = require("http");
 const fs = require("fs");
@@ -40,8 +49,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildVoiceStates
-  ]
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessageReactions
+  ],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
 // =========================
@@ -97,7 +108,7 @@ function getUserData(userId) {
       voiceLevel: 1,
       lastMessageTimestamp: 0,
       coins: 0,
-      lastDaily: 0,
+      lastDaily: 1,
       lastTrabalhar: 0,
       lastPescar: 0,
       lastRoubar: 0
@@ -305,7 +316,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("embed")
-    .setDescription("Cria um anúncio bonito em embed (staff).")
+    .setDescription("Abre um construtor interativo de embed (staff).")
     .addStringOption(option =>
       option.setName("titulo").setDescription("Título do embed").setRequired(true)
     )
@@ -314,18 +325,6 @@ const commands = [
         .setName("descricao")
         .setDescription("Texto do embed (use \\n pra quebrar linha)")
         .setRequired(true)
-    )
-    .addStringOption(option =>
-      option
-        .setName("cor")
-        .setDescription("Cor em hexadecimal, ex: #ff0000")
-        .setRequired(false)
-    )
-    .addChannelOption(option =>
-      option
-        .setName("canal")
-        .setDescription("Canal onde vai ser postado (padrão: este canal)")
-        .setRequired(false)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
@@ -484,26 +483,23 @@ const FOOTBALL_API_BASE = "https://v3.football.api-sports.io";
 const LIGAS_BRASIL = {
   serieA: { id: 71, nome: "Serie A", country: "Brazil" },
   serieB: { id: 72, nome: "Serie B", country: "Brazil" },
-  copaDoBrasil: { id: 73, nome: "Copa do Brasil", country: "Brazil" },
+  copaDoBrasil: { id: 73, nome: "Copa do Brazil", country: "Brazil" },
   libertadores: { id: 13, nome: "Libertadores", country: null },
   sulAmericana: { id: 11, nome: "Sudamericana", country: null }
 };
 let SELECAO_TEAM_ID = 6; // Seleção Brasileira
 
 let futebolChannelId = null;
-// Com 5 competições + Seleção (6 chamadas por checagem), cada checagem gasta 6
-// requisições. A cada 6h dá 4 checagens/dia = 24 chamadas/dia, deixando bastante
-// folga dentro do limite grátis de 100/dia da API-Football (o resto fica livre
-// pro /jogos e pra descoberta de IDs no início).
-const FOOTBALL_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Com 5 competições + Seleção (6 chamadas por checagem), a cada 2h dá 72 chamadas/dia,
+// dentro do limite grátis de 100/dia da API-Football.
+const FOOTBALL_CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000;
 const FOOTBALL_REMINDER_WINDOW_MIN = 150; // cobre com folga o intervalo de checagem
 const avisosEnviados = new Set();   // fixture.id que já recebeu o aviso de "tá quase começando"
 const resultadosEnviados = new Set(); // fixture.id que já recebeu o resultado final
 
-// Cache pro /jogos, pra não gastar a cota da API se várias pessoas usarem seguido.
-// 30 min é de boa porque os próximos jogos não mudam de minuto em minuto.
+// Cache curto pro /jogos, pra não gastar a cota da API se várias pessoas usarem seguido
 let jogosCache = { timestamp: 0, dados: null };
-const JOGOS_CACHE_MS = 30 * 60 * 1000;
+const JOGOS_CACHE_MS = 10 * 60 * 1000;
 
 async function footballApiFetch(endpoint, params) {
   const url = new URL(`${FOOTBALL_API_BASE}${endpoint}`);
@@ -526,22 +522,7 @@ async function footballApiFetch(endpoint, params) {
       throw new Error(`API-Football respondeu ${response.status}`);
     }
 
-    const data = await response.json();
-
-    // ⚠️ IMPORTANTE: a API-Football quase sempre responde HTTP 200, mesmo quando
-    // tem algum problema (chave errada, endpoint errado pro seu plano, parâmetro
-    // inválido, cota estourada etc). O erro real vem dentro do JSON, no campo
-    // "errors". Antes esse erro era ignorado e o bot tratava como "0 jogos
-    // encontrados" — por isso o /jogos nunca mostrava nada mesmo com jogos rolando.
-    const errosApi = data?.errors;
-    const temErro = errosApi && (Array.isArray(errosApi) ? errosApi.length > 0 : Object.keys(errosApi).length > 0);
-
-    if (temErro) {
-      console.error(`❌ API-Football devolveu erro em ${endpoint} (params: ${JSON.stringify(params)}):`, errosApi);
-      throw new Error(`API-Football: ${JSON.stringify(errosApi)}`);
-    }
-
-    return data;
+    return response.json();
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error("Tempo esgotado conectando na API-Football (10s)");
@@ -718,37 +699,165 @@ client.once("ready", async () => {
   } else {
     console.log("⚠️ API_FOOTBALL_KEY não configurada — avisos de futebol desativados.");
   }
+
+  const guildVerificacao = client.guilds.cache.get(GUILD_ID);
+  if (guildVerificacao && !NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) {
+    const canalVerificacao = await ensureVerificacaoChannel(guildVerificacao);
+    if (canalVerificacao) {
+      const mensagem = await ensureVerificacaoMessage(canalVerificacao);
+      if (mensagem) {
+        verificacaoMessageId = mensagem.id;
+        console.log("🔒 Sistema de verificação ativo.");
+      }
+    }
+  } else {
+    console.log("⚠️ NAO_VERIFICADO_ROLE_ID não configurado — verificação desativada.");
+  }
 });
 
 // =========================
-// BOAS-VINDAS — LINK DA PÁGINA DE INTERESSES
+// VERIFICAÇÃO POR REAÇÃO — PORTÃO DE ENTRADA
 // =========================
-// Assim que alguém entra no servidor, o bot manda a página de onboarding
-// (a mesma que tem em "/") pra pessoa escolher o que quer acompanhar.
+// Novo membro ganha o cargo "Não Verificado" e só enxerga o canal de verificação
+// (isso você configura nas permissões dos canais, veja instruções no chat).
+// Quando reage na mensagem fixa com os emojis, ganha o(s) cargo(s) de interesse
+// e perde o "Não Verificado", liberando o resto do servidor.
+const NAO_VERIFICADO_ROLE_ID = "1552496115566252082";
+
+const INTEREST_EMOJIS = {
+  "⚽": "futebol",
+  "🪙": "apostas",
+  "🏴‍☠️": "pirataria"
+};
+
+const VERIFICACAO_MARCADOR = "verificacao-baguncinha";
+let verificacaoMessageId = null;
+
+// Acha o canal #verificacao, ou cria se não existir
+async function ensureVerificacaoChannel(guild) {
+  let channel = guild.channels.cache.find(
+    c => c.name === "verificacao" && c.type === ChannelType.GuildText
+  );
+
+  if (!channel) {
+    try {
+      channel = await guild.channels.create({
+        name: "verificacao",
+        type: ChannelType.GuildText,
+        topic: "🔒 Reaja aqui pra liberar acesso ao servidor"
+      });
+      console.log("✅ Canal #verificacao criado.");
+    } catch (error) {
+      console.error("❌ Não consegui criar o canal #verificacao (confere a permissão 'Gerenciar Canais'):");
+      console.error(error);
+      return null;
+    }
+  }
+
+  return channel;
+}
+
+// Acha a mensagem de verificação já existente, ou cria uma nova com as reações
+async function ensureVerificacaoMessage(channel) {
+  try {
+    const mensagens = await channel.messages.fetch({ limit: 20 });
+    const existente = mensagens.find(
+      m => m.author.id === client.user.id && m.embeds[0]?.footer?.text === VERIFICACAO_MARCADOR
+    );
+
+    if (existente) {
+      return existente;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🔒 Verificação de acesso")
+      .setDescription(
+        "Bem-vindo(a) à Baguncinha! Pra liberar o acesso ao resto do servidor, reage aqui embaixo " +
+        "com o que você quer acompanhar:\n\n" +
+        "⚽ — Futebol\n🪙 — Apostas & Economia\n🏴‍☠️ — Pirataria\n\n" +
+        "Assim que reagir com pelo menos um, seu acesso sera liberado manin!."
+      )
+      .setColor(0x5865f2)
+      .setFooter({ text: VERIFICACAO_MARCADOR });
+
+    const mensagem = await channel.send({ embeds: [embed] });
+    for (const emoji of Object.keys(INTEREST_EMOJIS)) {
+      await mensagem.react(emoji);
+    }
+
+    return mensagem;
+  } catch (error) {
+    console.error("❌ Erro ao preparar mensagem de verificação:", error);
+    return null;
+  }
+}
+
 client.on("guildMemberAdd", async member => {
   if (member.user.bot) return;
-
-  const linkOnboarding = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-
-  const embed = new EmbedBuilder()
-    .setTitle(`🎉 Salve, ${member.user.username}! Bem-vindo(a) à Baguncinha`)
-    .setDescription(
-      `Antes de mais nada, escolhe o que você quer acompanhar por aqui — leva uns 10 segundos:\n\n` +
-      `👉 ${linkOnboarding}\n\n` +
-      `Marca o que te interessa (⚽ futebol, 🪙 apostas, ou só a zoeira 🏴‍☠️) e a gente já libera o cargo certo pra você automaticamente.`
-    )
-    .setColor(0x5865f2)
-    .setFooter({ text: "Bot Baguncinha" });
+  if (NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) return; // ainda não configurado
 
   try {
-    await member.send({ embeds: [embed] });
-    console.log(`✅ DM de boas-vindas enviada pra ${member.user.tag}`);
+    await member.roles.add(NAO_VERIFICADO_ROLE_ID);
+    console.log(`🔒 ${member.user.tag} marcado como não verificado.`);
   } catch (error) {
-    console.log(`⚠️ Não consegui mandar DM pra ${member.user.tag} (DM fechada?). Postando no canal do sistema...`);
-    const canal = member.guild.systemChannel;
-    if (canal) {
-      canal.send({ content: `${member}`, embeds: [embed] }).catch(() => {});
+    console.error("❌ Erro ao dar cargo de não verificado:", error);
+  }
+});
+
+client.on("messageReactionAdd", async (reaction, user) => {
+  if (user.bot) return;
+  if (reaction.message.id !== verificacaoMessageId) return;
+
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch {
+      return;
     }
+  }
+
+  const interesse = INTEREST_EMOJIS[reaction.emoji.name];
+  if (!interesse) return;
+
+  const guild = reaction.message.guild;
+  const member = await guild.members.fetch(user.id).catch(() => null);
+  if (!member) return;
+
+  const roleId = INTEREST_ROLES[interesse];
+  if (roleId && !roleId.startsWith("COLOQUE_")) {
+    await member.roles.add(roleId).catch(() => {});
+  }
+
+  if (!NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_") && member.roles.cache.has(NAO_VERIFICADO_ROLE_ID)) {
+    await member.roles.remove(NAO_VERIFICADO_ROLE_ID).catch(() => {});
+    member.send("✅ Verificado! Já pode acessar o resto do servidor. Bem-vindo(a)!").catch(() => {});
+    console.log(`✅ ${user.tag} verificado.`);
+  }
+});
+
+client.on("messageReactionRemove", async (reaction, user) => {
+  if (user.bot) return;
+  if (reaction.message.id !== verificacaoMessageId) return;
+
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch {
+      return;
+    }
+  }
+
+  const interesse = INTEREST_EMOJIS[reaction.emoji.name];
+  if (!interesse) return;
+
+  const guild = reaction.message.guild;
+  const member = await guild.members.fetch(user.id).catch(() => null);
+  if (!member) return;
+
+  // Tira só o cargo de interesse — não bloqueia de novo o acesso já liberado
+  const roleId = INTEREST_ROLES[interesse];
+  if (roleId && !roleId.startsWith("COLOQUE_")) {
+    await member.roles.remove(roleId).catch(() => {});
   }
 });
 
@@ -771,13 +880,13 @@ client.on("messageCreate", async message => {
 
   if (leveledUp) {
     message.channel
-      .send(`💬 Salve ${message.author}, você subiu pro **nível de texto ${updated.textLevel}**!`)
+      .send(`💬 Salve ${message.author}, você subiu seu **nível de texto ${updated.textLevel}**!`)
       .catch(() => {});
 
     const newRoleId = await updateLevelRole(message.guild, message.author.id, getTotalLevel(updated));
     if (newRoleId) {
       message.channel
-        .send(`🏅 ${message.author} desbloqueou o cargo <@&${newRoleId}> na correria!`)
+        .send(`🏅 ${message.author} desbloqueou o cargo <@&${newRoleId}> na marra!`)
         .catch(() => {});
     }
   }
@@ -816,7 +925,7 @@ async function tickVoiceXp() {
         const newRoleId = await updateLevelRole(guild, member.id, getTotalLevel(updated));
         if (newRoleId && announceChannel) {
           announceChannel
-            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> na correria!`)
+            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> merece meu respeito!!`)
             .catch(() => {});
         }
       }
@@ -825,9 +934,199 @@ async function tickVoiceXp() {
 }
 
 // =========================
+// CONSTRUTOR INTERATIVO DE /embed
+// =========================
+const embedDrafts = new Map(); // userId -> rascunho do embed em edição
+
+const CORES_EMBED = {
+  azul: { nome: "🔵 Azul", valor: 0x5865f2 },
+  vermelho: { nome: "🔴 Vermelho", valor: 0xed4245 },
+  verde: { nome: "🟢 Verde", valor: 0x57f287 },
+  amarelo: { nome: "🟡 Amarelo", valor: 0xfee75c },
+  roxo: { nome: "🟣 Roxo", valor: 0x9b59b6 },
+  laranja: { nome: "🟠 Laranja", valor: 0xe67e22 },
+  preto: { nome: "⚫ Preto", valor: 0x23272a },
+  branco: { nome: "⚪ Branco", valor: 0xffffff },
+  rosa: { nome: "🌸 Rosa", valor: 0xeb459e },
+  aleatoria: { nome: "🎲 Aleatória (sorteia toda vez)", valor: null }
+};
+
+function urlValida(valor) {
+  return typeof valor === "string" && /^https?:\/\//i.test(valor);
+}
+
+function montarPreviewEmbed(draft) {
+  const cor = draft.cor === null ? Math.floor(Math.random() * 0xffffff) : draft.cor;
+
+  const embed = new EmbedBuilder()
+    .setTitle(draft.titulo)
+    .setDescription(draft.descricao)
+    .setColor(cor)
+    .setFooter({ text: draft.footer || `Postado por ${draft.autorNome}` });
+
+  if (draft.imagemUrl) embed.setImage(draft.imagemUrl);
+  if (draft.linkTitulo) embed.setURL(draft.linkTitulo);
+
+  return embed;
+}
+
+function montarComponentesEmbedBuilder() {
+  const linhaCanal = new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId("embedbuilder_canal")
+      .setPlaceholder("📌 Escolher canal (padrão: este canal)")
+      .addChannelTypes(ChannelType.GuildText)
+  );
+
+  const linhaCor = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("embedbuilder_cor")
+      .setPlaceholder("🎨 Escolher cor")
+      .addOptions(
+        Object.entries(CORES_EMBED).map(([id, cor]) => ({
+          label: cor.nome,
+          value: id
+        }))
+      )
+  );
+
+  const linhaBotoes1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("embedbuilder_imagem").setLabel("🖼️ Imagem").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("embedbuilder_footer").setLabel("📌 Rodapé").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("embedbuilder_link").setLabel("🔗 Link do título").setStyle(ButtonStyle.Secondary)
+  );
+
+  const linhaBotoes2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("embedbuilder_publicar").setLabel("✅ Publicar").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("embedbuilder_cancelar").setLabel("❌ Cancelar").setStyle(ButtonStyle.Danger)
+  );
+
+  return [linhaCanal, linhaCor, linhaBotoes1, linhaBotoes2];
+}
+
+async function handleEmbedBuilderInteraction(interaction) {
+  const userId = interaction.user.id;
+  const draft = embedDrafts.get(userId);
+
+  if (!draft) {
+    const resposta = { content: "❌ Essa sessão de embed expirou. Roda `/embed` de novo.", ephemeral: true };
+    if (interaction.isModalSubmit() || interaction.isMessageComponent()) {
+      await interaction.reply(resposta).catch(() => {});
+    }
+    return;
+  }
+
+  // Botões que abrem um modal (imagem, rodapé, link)
+  if (interaction.isButton() && ["embedbuilder_imagem", "embedbuilder_footer", "embedbuilder_link"].includes(interaction.customId)) {
+    const campoMap = {
+      embedbuilder_imagem: {
+        customId: "embedbuilder_modal_imagem",
+        titulo: "Link da imagem",
+        label: "URL da imagem (vazio = remover)",
+        valorAtual: draft.imagemUrl || ""
+      },
+      embedbuilder_footer: {
+        customId: "embedbuilder_modal_footer",
+        titulo: "Rodapé do embed",
+        label: "Texto do rodapé (vazio = remover)",
+        valorAtual: draft.footer || ""
+      },
+      embedbuilder_link: {
+        customId: "embedbuilder_modal_link",
+        titulo: "Link do título",
+        label: "URL que o título vai abrir (vazio = remover)",
+        valorAtual: draft.linkTitulo || ""
+      }
+    };
+
+    const campo = campoMap[interaction.customId];
+
+    const modal = new ModalBuilder().setCustomId(campo.customId).setTitle(campo.titulo);
+    const input = new TextInputBuilder()
+      .setCustomId("valor")
+      .setLabel(campo.label)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setValue(campo.valorAtual);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    await interaction.showModal(modal);
+    return;
+  }
+
+  // Seleção de cor
+  if (interaction.isStringSelectMenu() && interaction.customId === "embedbuilder_cor") {
+    draft.cor = CORES_EMBED[interaction.values[0]].valor;
+    await interaction.update({ embeds: [montarPreviewEmbed(draft)], components: montarComponentesEmbedBuilder() });
+    return;
+  }
+
+  // Seleção de canal
+  if (interaction.isChannelSelectMenu() && interaction.customId === "embedbuilder_canal") {
+    draft.canalId = interaction.values[0];
+    await interaction.update({ embeds: [montarPreviewEmbed(draft)], components: montarComponentesEmbedBuilder() });
+    return;
+  }
+
+  // Publicar
+  if (interaction.isButton() && interaction.customId === "embedbuilder_publicar") {
+    const canal = draft.canalId
+      ? await interaction.guild.channels.fetch(draft.canalId).catch(() => null)
+      : interaction.channel;
+
+    if (!canal) {
+      await interaction.reply({ content: "❌ Não achei o canal escolhido.", ephemeral: true });
+      return;
+    }
+
+    try {
+      await canal.send({ embeds: [montarPreviewEmbed(draft)] });
+      embedDrafts.delete(userId);
+      await interaction.update({ content: `✅ Anúncio postado em ${canal}.`, embeds: [], components: [] });
+    } catch (error) {
+      console.error("❌ Erro ao publicar embed:", error);
+      await interaction.reply({
+        content: "❌ Não consegui postar nesse canal. Confere se eu tenho permissão lá.",
+        ephemeral: true
+      });
+    }
+    return;
+  }
+
+  // Cancelar
+  if (interaction.isButton() && interaction.customId === "embedbuilder_cancelar") {
+    embedDrafts.delete(userId);
+    await interaction.update({ content: "❌ Cancelado.", embeds: [], components: [] });
+    return;
+  }
+
+  // Retorno dos modais (imagem, rodapé, link)
+  if (interaction.isModalSubmit()) {
+    const valor = interaction.fields.getTextInputValue("valor").trim();
+
+    if (interaction.customId === "embedbuilder_modal_imagem") {
+      draft.imagemUrl = urlValida(valor) ? valor : null;
+    } else if (interaction.customId === "embedbuilder_modal_footer") {
+      draft.footer = valor || null;
+    } else if (interaction.customId === "embedbuilder_modal_link") {
+      draft.linkTitulo = urlValida(valor) ? valor : null;
+    }
+
+    await interaction.update({ embeds: [montarPreviewEmbed(draft)], components: montarComponentesEmbedBuilder() });
+    return;
+  }
+}
+
+// =========================
 // INTERAÇÕES
 // =========================
 client.on("interactionCreate", async interaction => {
+  // Componentes/modais do construtor de /embed (não são slash commands)
+  if (interaction.customId && interaction.customId.startsWith("embedbuilder_")) {
+    await handleEmbedBuilderInteraction(interaction);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -871,7 +1170,6 @@ client.on("interactionCreate", async interaction => {
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
-        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).\n" +
         "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin)."
       );
       console.log("✅ /help respondido");
@@ -1059,34 +1357,27 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "embed") {
       const titulo = interaction.options.getString("titulo");
       const descricao = interaction.options.getString("descricao").replace(/\\n/g, "\n");
-      const corInput = interaction.options.getString("cor");
-      const canal = interaction.options.getChannel("canal") || interaction.channel;
 
-      let cor = 0x5865f2;
-      if (corInput) {
-        const hex = corInput.replace("#", "");
-        if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-          cor = parseInt(hex, 16);
-        }
-      }
+      const draft = {
+        titulo,
+        descricao,
+        cor: 0x5865f2,
+        imagemUrl: null,
+        footer: null,
+        linkTitulo: null,
+        canalId: null,
+        autorNome: interaction.user.username
+      };
 
-      const embed = new EmbedBuilder()
-        .setTitle(titulo)
-        .setDescription(descricao)
-        .setColor(cor)
-        .setFooter({ text: `Postado por ${interaction.user.username}` });
+      embedDrafts.set(interaction.user.id, draft);
 
-      try {
-        await canal.send({ embeds: [embed] });
-        await interaction.reply({ content: `✅ Anúncio postado em ${canal}.`, ephemeral: true });
-      } catch (error) {
-        console.error("❌ Erro ao postar embed:", error);
-        await interaction.reply({
-          content: "❌ Não consegui postar nesse canal. Confere se eu tenho permissão lá.",
-          ephemeral: true
-        });
-      }
-      console.log("✅ /embed respondido");
+      await interaction.reply({
+        embeds: [montarPreviewEmbed(draft)],
+        components: montarComponentesEmbedBuilder(),
+        ephemeral: true
+      });
+
+      console.log("✅ /embed (construtor) aberto");
       return;
     }
 
@@ -1273,11 +1564,11 @@ client.on("interactionCreate", async interaction => {
       const quantidade = interaction.options.getInteger("quantidade");
 
       if (alvo.id === interaction.user.id) {
-        await interaction.reply({ content: "❌ Não dá pra doar pra si mesmo, cria.", ephemeral: true });
+        await interaction.reply({ content: "❌ Não dá pra doar pra si mesmo, mn (???).", ephemeral: true });
         return;
       }
       if (alvo.bot) {
-        await interaction.reply({ content: "❌ Bot não precisa de moeda, esquece.", ephemeral: true });
+        await interaction.reply({ content: "❌ NÃO preciso de moeda mn, ta tirando?.", ephemeral: true });
         return;
       }
 
@@ -1285,7 +1576,7 @@ client.on("interactionCreate", async interaction => {
 
       if (doador.coins < quantidade) {
         await interaction.reply({
-          content: `❌ Você não tem ${formatarMoedas(quantidade)} pra doar. Sua carteira: ${formatarMoedas(doador.coins)}.`,
+          content: `❌ Você não tem esse valor (dinheiro imaginario é?) ${formatarMoedas(quantidade)} pra doar. Sua carteira: ${formatarMoedas(doador.coins)}.`,
           ephemeral: true
         });
         return;
@@ -1312,7 +1603,7 @@ client.on("interactionCreate", async interaction => {
       );
 
       const embed = new EmbedBuilder()
-        .setTitle("🛒 Loja da quebrada")
+        .setTitle("🛒 Loja baguncinha")
         .setDescription(linhas.join("\n\n"))
         .setColor(0x9b59b6);
 
@@ -1415,52 +1706,23 @@ client.on("interactionCreate", async interaction => {
           fixtures = jogosCache.dados;
         } else {
           const ano = new Date().getFullYear();
-          const chavesLigas = Object.keys(LIGAS_BRASIL);
 
-          // Usamos allSettled em vez de Promise.all: se UMA competição falhar
-          // (ex: plano grátis não dá acesso a ela), as outras continuam
-          // aparecendo em vez do comando inteiro quebrar e cair no "sem jogos".
           const buscasLigas = Object.values(LIGAS_BRASIL).map(liga =>
             footballApiFetch("/fixtures", { league: liga.id, season: ano, next: 3 })
           );
           const buscaSelecao = footballApiFetch("/fixtures", { team: SELECAO_TEAM_ID, next: 3 });
 
-          const resultados = await Promise.allSettled([...buscasLigas, buscaSelecao]);
-
-          // Log de diagnóstico: mostra no console (Render -> Logs) exatamente
-          // quantos jogos cada competição devolveu, ou o erro que ela deu.
-          // Se depois de aplicar essa correção o /jogos continuar vazio,
-          // é só olhar esse log pra ver a causa real (ex: erro de plano/cota
-          // da API-Football, e não mais um bug silencioso do código).
-          resultados.forEach((resultado, index) => {
-            const nomeCompeticao = chavesLigas[index] || "Seleção";
-            if (resultado.status === "fulfilled") {
-              console.log(`⚽ [/jogos] ${nomeCompeticao}: ${resultado.value?.response?.length ?? 0} jogo(s)`);
-            } else {
-              console.error(`⚽ [/jogos] ${nomeCompeticao} falhou:`, resultado.reason?.message || resultado.reason);
-            }
-          });
+          const resultados = await Promise.all([...buscasLigas, buscaSelecao]);
 
           fixtures = resultados
-            .filter(resultado => resultado.status === "fulfilled")
-            .flatMap(resultado => resultado.value?.response || [])
+            .flatMap(resultado => resultado?.response || [])
             .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
 
-          // Se TODAS as buscas falharam e a gente tem um cache antigo (mesmo vencido),
-          // usa ele em vez de mostrar erro/vazio pro usuário.
-          const todasFalharam = resultados.every(r => r.status === "rejected");
-          if (todasFalharam && jogosCache.dados) {
-            fixtures = jogosCache.dados;
-          } else {
-            jogosCache = { timestamp: Date.now(), dados: fixtures };
-          }
+          jogosCache = { timestamp: Date.now(), dados: fixtures };
         }
 
         if (fixtures.length === 0) {
-          await interaction.editReply(
-            "Não achei nenhum jogo marcado por enquanto.\n" +
-            "-# Se isso persistir, dá uma olhada nos logs do Render: pode ser um erro da API-Football (chave errada, plano sem acesso a essa liga/temporada, ou cota estourada) que agora aparece no console."
-          );
+          await interaction.editReply("Não achei nenhum jogo marcado por enquanto.");
           return;
         }
 
@@ -1563,15 +1825,13 @@ client.on("warn", warning => {
 });
 
 // =========================
-// LOGIN COM DISCORD — PÁGINA DE INTERESSES
+// CARGOS POR INTERESSE (ONBOARDING NA ENTRADA)
 // =========================
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const REDIRECT_URI = `${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}/callback`;
-
+// Cole aqui os IDs dos cargos que cada interesse libera.
 const INTEREST_ROLES = {
-  futebol: "COLOQUE_O_ID_DO_CARGO_AQUI",
-  apostas: "COLOQUE_O_ID_DO_CARGO_AQUI",
-  pirataria: "COLOQUE_O_ID_DO_CARGO_AQUI"
+  futebol: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Notificações de Futebol
+  apostas: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Fã de Apostas
+  pirataria: "COLOQUE_O_ID_DO_CARGO_AQUI"  // ex: Pirata Oficial 🏴‍☠️
 };
 
 const NOMES_INTERESSES = {
@@ -1580,266 +1840,13 @@ const NOMES_INTERESSES = {
   pirataria: "🏴‍☠️ Pirataria"
 };
 
-const oauthStates = new Map();
-const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
-
-function gerarState() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
-function limparStatesExpirados() {
-  const agora = Date.now();
-  for (const [state, dados] of oauthStates.entries()) {
-    if (agora - dados.criadoEm > OAUTH_STATE_TTL_MS) {
-      oauthStates.delete(state);
-    }
-  }
-}
-
-async function trocarCodePorToken(code) {
-  const body = new URLSearchParams({
-    client_id: CLIENT_ID,
-    client_secret: DISCORD_CLIENT_SECRET,
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: REDIRECT_URI
-  });
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-  try {
-    const response = await fetch("https://discord.com/api/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error(`Discord token endpoint respondeu ${response.status}`);
-    }
-
-    return response.json();
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function buscarUsuarioDiscord(accessToken) {
-  const response = await fetch("https://discord.com/api/users/@me", {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Discord /users/@me respondeu ${response.status}`);
-  }
-
-  return response.json();
-}
-
-function paginaHtml(conteudo) {
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bot Baguncinha</title>
-<style>
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #0f0f14;
-    color: #eee;
-    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    padding: 24px;
-    box-sizing: border-box;
-  }
-  .card {
-    max-width: 480px;
-    width: 100%;
-    background: #17171f;
-    border: 1px solid #26262f;
-    border-radius: 16px;
-    padding: 32px;
-  }
-  h1 { font-size: 1.4rem; margin-top: 0; }
-  p { color: #a8a8b3; line-height: 1.5; }
-  label {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: #1f1f29;
-    border: 1px solid #2c2c38;
-    border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 12px;
-    cursor: pointer;
-  }
-  label:hover { border-color: #5865f2; }
-  input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; }
-  .interesse-titulo { font-weight: 600; }
-  .interesse-desc { font-size: 0.85rem; color: #a8a8b3; }
-  button {
-    width: 100%;
-    padding: 14px;
-    border: none;
-    border-radius: 10px;
-    background: #5865f2;
-    color: white;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    margin-top: 8px;
-  }
-  button:hover { background: #4752c4; }
-  .status { text-align: center; }
-  .emoji { font-size: 2.5rem; margin-bottom: 8px; }
-</style>
-</head>
-<body>
-  <div class="card">
-    ${conteudo}
-  </div>
-</body>
-</html>`;
-}
-
-function paginaInicial() {
-  return paginaHtml(`
-    <h1>🎉 Bem-vindo(a) à Baguncinha!</h1>
-    <p>Antes de começar, escolhe o que você quer acompanhar por aqui. A gente já libera o cargo certo pra você receber os avisos.</p>
-    <form action="/login" method="GET">
-      <label>
-        <input type="checkbox" name="interesses" value="futebol">
-        <div>
-          <div class="interesse-titulo">⚽ Futebol</div>
-          <div class="interesse-desc">Avisos de jogos do Brasileirão, Copa do Brasil, Libertadores e Seleção</div>
-        </div>
-      </label>
-      <label>
-        <input type="checkbox" name="interesses" value="apostas">
-        <div>
-          <div class="interesse-titulo">🪙 Apostas &amp; Economia</div>
-          <div class="interesse-desc">Fica ligado nos comandos de moeda, apostas e ranking do servidor</div>
-        </div>
-      </label>
-      <label>
-        <input type="checkbox" name="interesses" value="pirataria">
-        <div>
-          <div class="interesse-titulo">🏴‍☠️ Pirataria</div>
-          <div class="interesse-desc">É só zoeira, mas quem marcar ganha o cargo 🏴‍☠️ kkkkk</div>
-        </div>
-      </label>
-      <button type="submit">Continuar com Discord</button>
-    </form>
-  `);
-}
-
-function paginaSucesso(nomesEscolhidos) {
-  return paginaHtml(`
-    <div class="status">
-      <div class="emoji">✅</div>
-      <h1>Prontinho!</h1>
-      <p>Cargo(s) atualizado(s): <strong>${nomesEscolhidos.join(", ") || "nenhum selecionado"}</strong></p>
-      <p>Pode fechar essa aba e voltar pro Discord.</p>
-    </div>
-  `);
-}
-
-function paginaErro(mensagem) {
-  return paginaHtml(`
-    <div class="status">
-      <div class="emoji">❌</div>
-      <h1>Deu ruim</h1>
-      <p>${mensagem}</p>
-    </div>
-  `);
-}
-
 // =========================
-// SERVIDOR HTTP — RENDER
+// SERVIDOR HTTP — RENDER (só pra manter o serviço vivo)
 // =========================
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-
-  if (url.pathname === "/") {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(paginaInicial());
-    return;
-  }
-
-  if (url.pathname === "/login") {
-    if (!DISCORD_CLIENT_SECRET) {
-      res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(paginaErro("O login com Discord ainda não foi configurado (falta DISCORD_CLIENT_SECRET no Render)."));
-      return;
-    }
-
-    limparStatesExpirados();
-
-    const interesses = url.searchParams.getAll("interesses");
-    const state = gerarState();
-    oauthStates.set(state, { interesses, criadoEm: Date.now() });
-
-    const authorizeUrl = new URL("https://discord.com/api/oauth2/authorize");
-    authorizeUrl.searchParams.set("client_id", CLIENT_ID);
-    authorizeUrl.searchParams.set("redirect_uri", REDIRECT_URI);
-    authorizeUrl.searchParams.set("response_type", "code");
-    authorizeUrl.searchParams.set("scope", "identify");
-    authorizeUrl.searchParams.set("state", state);
-
-    res.writeHead(302, { Location: authorizeUrl.toString() });
-    res.end();
-    return;
-  }
-
-  if (url.pathname === "/callback") {
-    const code = url.searchParams.get("code");
-    const state = url.searchParams.get("state");
-    const dadosState = state ? oauthStates.get(state) : null;
-
-    if (!code || !dadosState) {
-      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(paginaErro("Link inválido ou expirado. Volta pra página inicial e tenta de novo."));
-      return;
-    }
-
-    oauthStates.delete(state);
-
-    try {
-      const tokenData = await trocarCodePorToken(code);
-      const usuario = await buscarUsuarioDiscord(tokenData.access_token);
-
-      const guild = client.guilds.cache.get(GUILD_ID);
-      if (!guild) throw new Error("Servidor não encontrado pelo bot.");
-
-      const member = await guild.members.fetch(usuario.id);
-
-      const rolesParaAdicionar = dadosState.interesses
-        .map(interesse => INTEREST_ROLES[interesse])
-        .filter(roleId => roleId && !roleId.startsWith("COLOQUE_"));
-
-      if (rolesParaAdicionar.length > 0) {
-        await member.roles.add(rolesParaAdicionar);
-      }
-
-      const nomesEscolhidos = dadosState.interesses.map(i => NOMES_INTERESSES[i] || i);
-
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(paginaSucesso(nomesEscolhidos));
-    } catch (error) {
-      console.error("❌ Erro no callback do OAuth:", error);
-      res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(paginaErro("Algo deu errado atualizando seus cargos. Confere se você já é membro do servidor e tenta de novo."));
-    }
-    return;
-  }
-
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+const server = http.createServer((req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/plain; charset=utf-8"
+  });
   res.end("🤖 Bot Baguncinha na área, tudo certo!");
 });
 
@@ -1869,8 +1876,10 @@ async function start() {
   }
 }
 
+// Salva automaticamente a cada 2 minutos
 setInterval(salvarDados, 2 * 60 * 1000);
 
+// Salva quando o processo for encerrado (deploy novo, reinício manual, etc.)
 function encerrarComSalvamento() {
   console.log("💾 Salvando banco de dados antes de encerrar...");
   salvarDados();
