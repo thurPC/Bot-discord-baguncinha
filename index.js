@@ -703,6 +703,38 @@ client.once("ready", async () => {
 });
 
 // =========================
+// BOAS-VINDAS — LINK DA PÁGINA DE INTERESSES
+// =========================
+// Assim que alguém entra no servidor, o bot manda a página de onboarding
+// (a mesma que tem em "/") pra pessoa escolher o que quer acompanhar.
+client.on("guildMemberAdd", async member => {
+  if (member.user.bot) return;
+
+  const linkOnboarding = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🎉 Salve, ${member.user.username}! Bem-vindo(a) à Baguncinha`)
+    .setDescription(
+      `Antes de mais nada, escolhe o que você quer acompanhar por aqui — leva uns 10 segundos:\n\n` +
+      `👉 ${linkOnboarding}\n\n` +
+      `Marca o que te interessa (⚽ futebol, 🪙 apostas, ou só a zoeira 🏴‍☠️) e a gente já libera o cargo certo pra você automaticamente.`
+    )
+    .setColor(0x5865f2)
+    .setFooter({ text: "Bot Baguncinha" });
+
+  try {
+    await member.send({ embeds: [embed] });
+    console.log(`✅ DM de boas-vindas enviada pra ${member.user.tag}`);
+  } catch (error) {
+    console.log(`⚠️ Não consegui mandar DM pra ${member.user.tag} (DM fechada?). Postando no canal do sistema...`);
+    const canal = member.guild.systemChannel;
+    if (canal) {
+      canal.send({ content: `${member}`, embeds: [embed] }).catch(() => {});
+    }
+  }
+});
+
+// =========================
 // GANHO DE XP POR MENSAGEM
 // =========================
 const XP_COOLDOWN_MS = 60 * 1000; // 1 minuto entre ganhos de XP por usuário
@@ -778,73 +810,6 @@ async function tickVoiceXp() {
 // INTERAÇÕES
 // =========================
 client.on("interactionCreate", async interaction => {
-
-  // =========================
-  // BOTÕES DE INTERESSE
-  // =========================
-  if (interaction.isButton()) {
-    const botoes = {
-      interesse_futebol: "1553051456293048540",
-      interesse_apostas: "",
-      interesse_pirataria: ""
-    };
-
-    const interesse = botoes[interaction.customId];
-
-    if (!interesse) return;
-
-    const roleId = INTEREST_ROLES[interesse];
-    const nomeInteresse = NOMES_INTERESSES[interesse];
-
-    if (!roleId || roleId.startsWith("COLOQUE_")) {
-      await interaction.reply({
-        content: `❌ O cargo de **${nomeInteresse}** ainda não foi configurado pelo administrador.`,
-        ephemeral: true
-      });
-      return;
-    }
-
-    try {
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-
-      // Se já tem o cargo → remove
-      if (member.roles.cache.has(roleId)) {
-        await member.roles.remove(roleId);
-
-        await interaction.reply({
-          content: `❌ Você saiu do interesse **${nomeInteresse}**.`,
-          ephemeral: true
-        });
-      }
-
-      // Se não tem → adiciona
-      else {
-        await member.roles.add(roleId);
-
-        await interaction.reply({
-          content: `✅ Você entrou no interesse **${nomeInteresse}**!`,
-          ephemeral: true
-        });
-      }
-
-    } catch (error) {
-      console.error("❌ Erro ao alterar cargo de interesse:");
-      console.error(error);
-
-      if (!interaction.replied) {
-        await interaction.reply({
-          content: "❌ Não consegui alterar seu cargo. Confere as permissões e a posição dos cargos do bot.",
-          ephemeral: true
-        });
-      }
-    }
-
-    return;
-  }
-
-  // =========================
-  // COMANDOS SLASH
-  // =========================
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -1294,7 +1259,7 @@ client.on("interactionCreate", async interaction => {
         return;
       }
       if (alvo.bot) {
-        await interaction.reply({ content: "❌ Eu nao preciso de esmola fdp.", ephemeral: true });
+        await interaction.reply({ content: "❌ Bot não precisa de moeda, esquece.", ephemeral: true });
         return;
       }
 
@@ -1712,8 +1677,8 @@ function paginaHtml(conteudo) {
 
 function paginaInicial() {
   return paginaHtml(`
-    <h1>🤖 Bem-vindo(a) ao Bot Baguncinha</h1>
-    <p>Escolhe o que você quer acompanhar no servidor. A gente já libera o cargo certo pra você receber os avisos.</p>
+    <h1>🎉 Bem-vindo(a) à Baguncinha!</h1>
+    <p>Antes de começar, escolhe o que você quer acompanhar por aqui. A gente já libera o cargo certo pra você receber os avisos.</p>
     <form action="/login" method="GET">
       <label>
         <input type="checkbox" name="interesses" value="futebol">
