@@ -412,7 +412,33 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("jogos")
-    .setDescription("Mostra os próximos jogos do Brasileirão e da Seleção.")
+    .setDescription("Mostra os próximos jogos do Brasileirão e da Seleção."),
+
+  new SlashCommandBuilder()
+    .setName("editarmoedas")
+    .setDescription("Adiciona, remove ou define as moedas de um usuário (admin).")
+    .addUserOption(option =>
+      option.setName("usuario").setDescription("Quem vai ter as moedas alteradas").setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("acao")
+        .setDescription("O que fazer com as moedas")
+        .setRequired(true)
+        .addChoices(
+          { name: "Adicionar", value: "adicionar" },
+          { name: "Remover", value: "remover" },
+          { name: "Definir (zera e coloca esse valor)", value: "definir" }
+        )
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("quantidade")
+        .setDescription("Quantidade de moedas")
+        .setRequired(true)
+        .setMinValue(0)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 
 ].map(command => command.toJSON());
 
@@ -795,7 +821,8 @@ client.on("interactionCreate", async interaction => {
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
-        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção)."
+        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).\n" +
+        "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin)."
       );
       console.log("✅ /help respondido");
       return;
@@ -1379,6 +1406,34 @@ client.on("interactionCreate", async interaction => {
       }
 
       console.log("✅ /jogos respondido");
+      return;
+    }
+
+    // =========================
+    // EDITAR MOEDAS (ADMIN)
+    // =========================
+    if (interaction.commandName === "editarmoedas") {
+      const alvo = interaction.options.getUser("usuario");
+      const acao = interaction.options.getString("acao");
+      const quantidade = interaction.options.getInteger("quantidade");
+
+      const data = getUserData(alvo.id);
+
+      if (acao === "adicionar") {
+        data.coins += quantidade;
+      } else if (acao === "remover") {
+        data.coins = Math.max(0, data.coins - quantidade);
+      } else if (acao === "definir") {
+        data.coins = quantidade;
+      }
+
+      salvarDados();
+
+      await interaction.reply({
+        content: `✅ Feito. Carteira de **${alvo.username}** agora tá em ${formatarMoedas(data.coins)}.`,
+        ephemeral: true
+      });
+      console.log("✅ /editarmoedas respondido");
       return;
     }
 
