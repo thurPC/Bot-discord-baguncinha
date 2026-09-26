@@ -822,7 +822,7 @@ client.on("interactionCreate", async interaction => {
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
         "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).\n" +
-        "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin)."
+      
       );
       console.log("✅ /help respondido");
       return;
