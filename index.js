@@ -821,8 +821,7 @@ client.on("interactionCreate", async interaction => {
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
-        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).\n" +
-      
+        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).
       );
       console.log("✅ /help respondido");
       return;
@@ -1204,7 +1203,7 @@ client.on("interactionCreate", async interaction => {
         );
       } else {
         const multa = Math.floor(Math.random() * 51) + 30; // perde 30 a 80
-        ladrao.coins = Math.max(0, ladrao.coins - multa);
+        ladrao.coins -= multa; // pode ficar negativo se não tiver o suficiente
 
         await interaction.reply(
           `🚨 Foi pego tentando roubar ${alvo.username} e pagou uma multa de ${formatarMoedas(multa)}.`
