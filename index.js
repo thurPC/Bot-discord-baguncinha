@@ -1441,7 +1441,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
-        content: "❌ Esse comando aí não existe, porra.",
+        content: "❌ Esse comando aí não existe, animal.",
         ephemeral: true
       });
     }
@@ -1453,7 +1453,7 @@ client.on("interactionCreate", async interaction => {
     try {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
-          content: "❌ Deu ruim aqui, porra. Tenta de novo.",
+          content: "❌ Deu ruim aqui, burro. Tenta de novo.",
           ephemeral: true
         });
       } else {
@@ -1489,7 +1489,7 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/plain; charset=utf-8"
   });
-  res.end("🤖 Bot Baguncinha na área, tudo certo!");
+  res.end("🤖 Bot Baguncinha suave, tudo certo!");
 });
 
 server.listen(PORT, "0.0.0.0", () => {
