@@ -724,15 +724,19 @@ client.once("ready", async () => {
 // VERIFICAÇÃO POR REAÇÃO — PORTÃO DE ENTRADA
 // =========================
 // Novo membro ganha o cargo "Não Verificado" e só enxerga o canal de verificação
-// (isso você configura nas permissões dos canais, veja instruções no chat).
+// (isso você configura nas permissões dos canais).
 // Quando reage na mensagem fixa com os emojis, ganha o(s) cargo(s) de interesse
 // e perde o "Não Verificado", liberando o resto do servidor.
 const NAO_VERIFICADO_ROLE_ID = "1552496115566252082";
 
+// ⚠️ CORRIGIDO: a chave "pirataria" aqui precisa ser IDÊNTICA à chave usada em
+// INTEREST_ROLES lá embaixo. Antes estava "piratarias" (com S) e não batia com
+// "pirataria" (sem S) do INTEREST_ROLES — por isso o cargo de pirataria nunca
+// era dado quando alguém reagia com 🏴‍☠️.
 const INTEREST_EMOJIS = {
   "⚽": "futebol",
   "🪙": "apostas",
-  "🏴‍☠️": "piratarias"
+  "🏴‍☠️": "pirataria"
 };
 
 const VERIFICACAO_MARCADOR = "verificacao-baguncinha";
@@ -1175,7 +1179,9 @@ client.on("interactionCreate", async interaction => {
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
+        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).\n" +
         "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin).\n" +
+        "🚧 `/bloquearcanais` — Bloqueia a visão dos canais pro cargo Não Verificado (só admin, roda uma vez)."
       );
       console.log("✅ /help respondido");
       return;
@@ -1449,11 +1455,11 @@ client.on("interactionCreate", async interaction => {
         "ajudou a organizar o mercado",
         "fez um freela de design",
         "vendeu uns doce na praça",
-        "trabalhou de flanelinha"
-        "trabalhou de ambulante"
-        "trabalhou de entregador da shopee"
-        "trabalhou de faxineiro(a)"
-        "trabalhou de jardineiro"
+        "trabalhou de flanelinha",
+        "trabalhou de ambulante",
+        "trabalhou de entregador da shopee",
+        "trabalhou de faxineiro(a)",
+        "trabalhou de jardineiro",
         "trabalhou de ajudante de pedreiro"
       ];
       const trampo = TRAMPOS[Math.floor(Math.random() * TRAMPOS.length)];
@@ -1480,7 +1486,7 @@ client.on("interactionCreate", async interaction => {
         await interaction.reply({
           content: `⏳ Sua vara ainda tá descansando. Volta em ~${minutos} min.`,
           ephemeral: true
-        }); // agora com cooldown de 8 min
+        });
         return;
       }
 
