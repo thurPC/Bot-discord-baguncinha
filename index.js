@@ -757,7 +757,7 @@ async function handlePptInteraction(interaction) {
     salvarDados();
 
     await interaction.message.edit({
-      content: `🪨📄✂️ **Resultado do desafio**\n${textoResultado}`,
+      content: ` # Resultado do desafio\n${textoResultado}`,
       embeds: [],
       components: []
     }).catch(() => {});
