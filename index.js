@@ -1782,7 +1782,7 @@ client.on("interactionCreate", async interaction => {
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
         "🎰 `/roleta` — Aposta moedas na Roleta Baguncinha.\n" +
         "🪨 `/ppt` — Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.\n" +
-        "🏆 `/conquistas` — Vê e reivindica suas conquistas do servidor.\n")
+        "🏆 `/conquistas` — Vê e reivindica suas conquistas do servidor.\n"
       );
       console.log("✅ /help respondido");
       return;
