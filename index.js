@@ -113,6 +113,7 @@ function getUserData(userId) {
       lastPescar: 0,
       lastRoubar: 0,
       lastRoleta: 0,           // cooldown da /roleta
+      presoAte: 0,             // timestamp — enquanto Date.now() < isso, tá "preso" (roubo malsucedido)
       turboTrabalhar: false,   // true depois de comprar o item que reduz o cooldown do /trabalhar
       xpBoostAte: 0,           // timestamp — enquanto Date.now() < isso, XP em dobro
       ticketsSorteio: 0,       // quantos bilhetes de sorteio a pessoa tem
@@ -124,6 +125,7 @@ function getUserData(userId) {
   // Compatibilidade: quem já tinha conta antes dessa atualização não tem esses campos
   const data = xpData.get(userId);
   if (data.lastRoleta === undefined) data.lastRoleta = 0;
+  if (data.presoAte === undefined) data.presoAte = 0;
   if (data.turboTrabalhar === undefined) data.turboTrabalhar = false;
   if (data.xpBoostAte === undefined) data.xpBoostAte = 0;
   if (data.ticketsSorteio === undefined) data.ticketsSorteio = 0;
@@ -232,6 +234,7 @@ const TRABALHAR_COOLDOWN_NORMAL_MS = 60 * 60 * 1000;
 const TRABALHAR_COOLDOWN_TURBO_MS = 25 * 60 * 1000; // com o item "Turbo Trabalhar" da loja
 const PESCAR_COOLDOWN_MS = 8 * 60 * 1000;
 const ROUBAR_COOLDOWN_MS = 20 * 60 * 1000;
+const ROUBAR_PRISAO_MS = 15 * 60 * 1000; // tempo preso quando o roubo dá errado
 const ROLETA_COOLDOWN_MS = 1 * 60 * 1000;
 const ROLETA_APOSTA_MIN = 100;
 const ROLETA_APOSTA_MAX = 5000;
@@ -242,8 +245,79 @@ function getTrabalharCooldown(data) {
   return data.turboTrabalhar ? TRABALHAR_COOLDOWN_TURBO_MS : TRABALHAR_COOLDOWN_NORMAL_MS;
 }
 
+// Quanto tempo ainda falta pra pessoa sair da prisão (0 se já não tá presa)
+function getPrisaoRestante(data) {
+  const restante = data.presoAte - Date.now();
+  return restante > 0 ? restante : 0;
+}
+
 function formatarMoedas(valor) {
   return `${valor} 🪙`;
+}
+
+// =========================
+// META DE MOEDAS DO SERVIDOR (10k, 20k, 30k...)
+// =========================
+// Cada meta (10.000, 20.000, 30.000...) só é anunciada e recompensada UMA VEZ pra
+// todo o servidor: a primeira pessoa a alcançar aquele total leva o prêmio, e as
+// metas já batidas ficam salvas num arquivo à parte pra sobreviver a reinícios.
+const METAS_FILE = path.join(__dirname, "metas.json");
+const METAS_TIER_MS = 10000; // de 10 em 10 mil moedas
+const metasBatidas = new Set(); // valores de meta (10000, 20000, ...) já anunciados
+
+function carregarMetas() {
+  try {
+    if (fs.existsSync(METAS_FILE)) {
+      const bruto = fs.readFileSync(METAS_FILE, "utf-8");
+      const lista = JSON.parse(bruto);
+      lista.forEach(valor => metasBatidas.add(valor));
+      console.log(`🏁 Metas de moedas carregadas (${metasBatidas.size} já batida(s)).`);
+    }
+  } catch (error) {
+    console.error("❌ Erro ao carregar metas de moedas:", error);
+  }
+}
+
+function salvarMetas() {
+  try {
+    fs.writeFileSync(METAS_FILE, JSON.stringify([...metasBatidas], null, 2));
+  } catch (error) {
+    console.error("❌ Erro ao salvar metas de moedas:", error);
+  }
+}
+
+// 10k -> 1.000 / 20k -> 4.000 / 30k -> 7.000 / 40k -> 10.000 ... (+3.000 a cada meta)
+function calcularRecompensaMeta(meta) {
+  const tier = meta / METAS_TIER_MS;
+  return 1000 + (tier - 1) * 3000;
+}
+
+// Confere se o saldo atual cruzou alguma meta nova de 10 em 10 mil. Se sim, dá a
+// recompensa e anuncia no canal onde o comando foi usado — mas só pra quem chega
+// primeiro em cada meta; quem chega depois não ganha nem gera novo anúncio.
+async function verificarMetaMoedas(canal, userId, data) {
+  const metaAtingivel = Math.floor(data.coins / METAS_TIER_MS) * METAS_TIER_MS;
+  if (metaAtingivel < METAS_TIER_MS) return;
+
+  for (let meta = METAS_TIER_MS; meta <= metaAtingivel; meta += METAS_TIER_MS) {
+    if (metasBatidas.has(meta)) continue;
+
+    metasBatidas.add(meta);
+    salvarMetas();
+
+    const recompensa = calcularRecompensaMeta(meta);
+    data.coins += recompensa;
+
+    if (canal) {
+      canal
+        .send(
+          `🏁 **META DO SERVIDOR BATIDA!**\n` +
+          `<@${userId}> foi a primeira pessoa a passar de **${meta.toLocaleString("pt-BR")} 🪙** no servidor!\n` +
+          `🎁 Recompensa: ${formatarMoedas(recompensa)}`
+        )
+        .catch(() => {});
+    }
+  }
 }
 
 // =========================
@@ -552,6 +626,8 @@ async function comprarItem(interaction, itemId) {
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     const descricaoPremio = await aplicarRecompensaCaixa(member, data, recompensa);
 
+    await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+
     const embed = new EmbedBuilder()
       .setTitle(`📦 ${item.nome} — ${recompensa.raridade}`)
       .setDescription(descricaoPremio)
@@ -753,6 +829,9 @@ async function handlePptInteraction(interaction) {
       textoResultado = `🏆 <@${match.desafiadoId}> venceu! ${PPT_OPCOES[escolhaB]} bate ${PPT_OPCOES[escolhaA]}. Levou ${formatarMoedas(match.aposta * 2)}.`;
     }
 
+    await verificarMetaMoedas(interaction.channel, match.desafianteId, desafianteData);
+    await verificarMetaMoedas(interaction.channel, match.desafiadoId, desafiadoData);
+
     pptMatches.delete(matchId);
     salvarDados();
 
@@ -845,6 +924,10 @@ const commands = [
   new SlashCommandBuilder()
     .setName("rank")
     .setDescription("Mostra o ranking de XP do servidor (top 10)."),
+
+  new SlashCommandBuilder()
+    .setName("rankmoedas")
+    .setDescription("Mostra o ranking de quem tem mais moedas no servidor (top 10)."),
 
   new SlashCommandBuilder()
     .setName("embed")
@@ -1770,12 +1853,13 @@ client.on("interactionCreate", async interaction => {
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Teu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
+        "💰 `/rankmoedas` — Ranking de quem tem mais moedas no servidor.\n" +
         "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
         "💰 `/carteira` — Vê quantas moedas você tem.\n" +
         "🎁 `/daily` — Recompensa diária de moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
         "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
-        "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal).\n" +
+        "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal e ir preso).\n" +
         "🤝 `/doar` — Doa moedas pra outra pessoa.\n" +
         "🎪 `/loja` — Abre a Baguncinha Store em embed com botões.\n" +
         "🛍️ `/comprar` — Compra um item da loja direto por comando.\n" +
@@ -1917,7 +2001,7 @@ client.on("interactionCreate", async interaction => {
     }
 
     // =========================
-    // RANK (LEADERBOARD)
+    // RANK (LEADERBOARD DE XP)
     // =========================
     if (interaction.commandName === "rank") {
       const ranking = [...xpData.entries()]
@@ -1960,6 +2044,46 @@ client.on("interactionCreate", async interaction => {
 
       await interaction.reply({ embeds: [embed] });
       console.log("✅ /rank respondido");
+      return;
+    }
+
+    // =========================
+    // RANKMOEDAS (LEADERBOARD DE MOEDAS)
+    // =========================
+    if (interaction.commandName === "rankmoedas") {
+      const ranking = [...xpData.entries()]
+        .filter(([, data]) => (data.coins || 0) > 0)
+        .sort((a, b) => (b[1].coins || 0) - (a[1].coins || 0))
+        .slice(0, 10);
+
+      if (ranking.length === 0) {
+        await interaction.reply("Ninguém tem moeda nenhuma ainda. Vai trabalhar, cria!");
+        return;
+      }
+
+      const MEDALHAS = ["🥇", "🥈", "🥉"];
+
+      const usuarios = await Promise.all(
+        ranking.map(([userId]) => client.users.fetch(userId).catch(() => null))
+      );
+
+      const linhas = ranking.map(([, data], index) => {
+        const user = usuarios[index];
+        const nome = user ? user.username : "Usuário desconhecido";
+        const posicao = MEDALHAS[index] || `**${index + 1}.**`;
+
+        return `${posicao} **${nome}** — ${formatarMoedas(data.coins)}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle("💰 Ranking de moedas da Baguncinha")
+        .setDescription(linhas.join("\n"))
+        .setColor(0xf1c40f)
+        .setThumbnail(usuarios[0]?.displayAvatarURL({ size: 256 }) || null)
+        .setFooter({ text: `Top ${ranking.length} mais ricos do servidor` });
+
+      await interaction.reply({ embeds: [embed] });
+      console.log("✅ /rankmoedas respondido");
       return;
     }
 
@@ -2028,6 +2152,9 @@ client.on("interactionCreate", async interaction => {
       data.coins += ganho;
       data.lastDaily = now;
 
+      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      salvarDados();
+
       await interaction.reply(`🎁 Você resgatou seu presente diario e ganhou ${formatarMoedas(ganho)}!`);
       console.log("✅ /daily respondido");
       return;
@@ -2039,6 +2166,16 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "trabalhar") {
       const data = getUserData(interaction.user.id);
       const now = Date.now();
+
+      const prisaoRestante = getPrisaoRestante(data);
+      if (prisaoRestante > 0) {
+        const minutosPreso = Math.ceil(prisaoRestante / (60 * 1000));
+        await interaction.reply({
+          content: `🚔 Você tá preso por causa daquele roubo malsucedido! Sai em ~${minutosPreso} min.`,
+          ephemeral: true
+        });
+        return;
+      }
 
       const trabalharCooldown = getTrabalharCooldown(data);
       if (now - data.lastTrabalhar < trabalharCooldown) {
@@ -2070,6 +2207,9 @@ client.on("interactionCreate", async interaction => {
       data.coins += ganho;
       data.lastTrabalhar = now;
 
+      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      salvarDados();
+
       await interaction.reply(`💼 Você ${trampo} e faturou ${formatarMoedas(ganho)}.`);
       console.log("✅ /trabalhar respondido");
       return;
@@ -2081,6 +2221,16 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "pescar") {
       const data = getUserData(interaction.user.id);
       const now = Date.now();
+
+      const prisaoRestante = getPrisaoRestante(data);
+      if (prisaoRestante > 0) {
+        const minutosPreso = Math.ceil(prisaoRestante / (60 * 1000));
+        await interaction.reply({
+          content: `🚔 Você tá preso por causa daquele roubo malsucedido! Sai em ~${minutosPreso} min.`,
+          ephemeral: true
+        });
+        return;
+      }
 
       if (now - data.lastPescar < PESCAR_COOLDOWN_MS) {
         const restante = PESCAR_COOLDOWN_MS - (now - data.lastPescar);
@@ -2105,6 +2255,9 @@ client.on("interactionCreate", async interaction => {
       const ganho = Math.floor(Math.random() * 91) + 20; // 20 a 110
       data.coins += ganho;
 
+      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      salvarDados();
+
       await interaction.reply(`🎣 Fisgou um peixe daora e vendeu por ${formatarMoedas(ganho)}!`);
       console.log("✅ /pescar respondido");
       return;
@@ -2128,6 +2281,16 @@ client.on("interactionCreate", async interaction => {
       const ladrao = getUserData(interaction.user.id);
       const vitima = getUserData(alvo.id);
       const now = Date.now();
+
+      const prisaoRestante = getPrisaoRestante(ladrao);
+      if (prisaoRestante > 0) {
+        const minutosPreso = Math.ceil(prisaoRestante / (60 * 1000));
+        await interaction.reply({
+          content: `🚔 Você tá preso! Sai em ~${minutosPreso} min antes de tentar outra roubada.`,
+          ephemeral: true
+        });
+        return;
+      }
 
       if (now - ladrao.lastRoubar < ROUBAR_COOLDOWN_MS) {
         const restante = ROUBAR_COOLDOWN_MS - (now - ladrao.lastRoubar);
@@ -2158,15 +2321,21 @@ client.on("interactionCreate", async interaction => {
         vitima.coins -= roubado;
         ladrao.coins += roubado;
 
+        await verificarMetaMoedas(interaction.channel, interaction.user.id, ladrao);
+        salvarDados();
+
         await interaction.reply(
           `🕵️ Deu certo! Você roubou ${formatarMoedas(roubado)} de ${alvo.username}.`
         );
       } else {
-        const multa = Math.floor(Math.random() * 51) + 30; // perde 30 a 80
+        const multa = Math.floor(Math.random() * (300 - 80 + 1)) + 80; // perde 80 a 300
         ladrao.coins -= multa; // pode ficar negativo se não tiver o suficiente
+        ladrao.presoAte = now + ROUBAR_PRISAO_MS;
+
+        salvarDados();
 
         await interaction.reply(
-          `🚨 Foi pego tentando roubar ${alvo.username} e pagou uma multa de ${formatarMoedas(multa)}.`
+          `🚨 Foi pego tentando roubar ${alvo.username} e pagou uma multa de ${formatarMoedas(multa)}. Ficou **preso por 15 minutos**! 🚔`
         );
       }
 
@@ -2204,6 +2373,9 @@ client.on("interactionCreate", async interaction => {
 
       doador.coins -= quantidade;
       recebedor.coins += quantidade;
+
+      await verificarMetaMoedas(interaction.channel, alvo.id, recebedor);
+      salvarDados();
 
       await interaction.reply(
         `🤝 Você doou ${formatarMoedas(quantidade)} pra **${alvo.username}**. Bonito gesto.`
@@ -2255,11 +2427,16 @@ client.on("interactionCreate", async interaction => {
 
       if (ganhou) {
         data.coins += quantidade;
+        await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+        salvarDados();
+
         await interaction.reply(
           `🪙 Deu **${resultado}**! Você dobrou a aposta e ganhou ${formatarMoedas(quantidade)}.`
         );
       } else {
         data.coins -= quantidade;
+        salvarDados();
+
         await interaction.reply(
           `🪙 Deu **${resultado}**... você perdeu ${formatarMoedas(quantidade)}. Próxima.`
         );
@@ -2302,6 +2479,7 @@ client.on("interactionCreate", async interaction => {
       const premio = Math.floor(quantidade * resultado.multiplicador);
       data.coins += premio;
 
+      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
       salvarDados();
 
       const embed = new EmbedBuilder()
@@ -2375,6 +2553,8 @@ client.on("interactionCreate", async interaction => {
       const member = await interaction.guild.members.fetch(interaction.user.id);
 
       const desbloqueadasAgora = await verificarConquistas(member, data);
+
+      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
       salvarDados();
 
       const linhas = Object.entries(CONQUISTAS).map(([id, conquista]) => {
@@ -2484,6 +2664,7 @@ client.on("interactionCreate", async interaction => {
         data.coins = quantidade;
       }
 
+      await verificarMetaMoedas(interaction.channel, alvo.id, data);
       salvarDados();
 
       await interaction.reply({
@@ -2633,6 +2814,7 @@ async function start() {
     }
 
     carregarDados();
+    carregarMetas();
 
     await registerCommands();
 
