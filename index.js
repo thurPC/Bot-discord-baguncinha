@@ -111,10 +111,26 @@ function getUserData(userId) {
       lastDaily: 0,
       lastTrabalhar: 0,
       lastPescar: 0,
-      lastRoubar: 0
+      lastRoubar: 0,
+      lastRoleta: 0,           // cooldown da /roleta
+      turboTrabalhar: false,   // true depois de comprar o item que reduz o cooldown do /trabalhar
+      xpBoostAte: 0,           // timestamp — enquanto Date.now() < isso, XP em dobro
+      ticketsSorteio: 0,       // quantos bilhetes de sorteio a pessoa tem
+      conquistas: [],          // ids de conquistas já desbloqueadas
+      itemLendario: false      // flag de quem já tirou o prêmio raro da caixa/roleta
     });
   }
-  return xpData.get(userId);
+
+  // Compatibilidade: quem já tinha conta antes dessa atualização não tem esses campos
+  const data = xpData.get(userId);
+  if (data.lastRoleta === undefined) data.lastRoleta = 0;
+  if (data.turboTrabalhar === undefined) data.turboTrabalhar = false;
+  if (data.xpBoostAte === undefined) data.xpBoostAte = 0;
+  if (data.ticketsSorteio === undefined) data.ticketsSorteio = 0;
+  if (data.conquistas === undefined) data.conquistas = [];
+  if (data.itemLendario === undefined) data.itemLendario = false;
+
+  return data;
 }
 
 function xpForNextLevel(level, type) {
@@ -134,6 +150,11 @@ function addXp(userId, amount, type) {
   const data = getUserData(userId);
   const xpKey = type === "voice" ? "voiceXp" : "textXp";
   const levelKey = type === "voice" ? "voiceLevel" : "textLevel";
+
+  // XP Boost da loja: dobra o ganho enquanto estiver ativo
+  if (Date.now() < data.xpBoostAte) {
+    amount *= 2;
+  }
 
   data[xpKey] += amount;
 
@@ -207,31 +228,542 @@ async function updateLevelRole(guild, userId, level) {
 // ECONOMIA — MOEDAS
 // =========================
 const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-const TRABALHAR_COOLDOWN_MS = 60 * 60 * 1000;
+const TRABALHAR_COOLDOWN_NORMAL_MS = 60 * 60 * 1000;
+const TRABALHAR_COOLDOWN_TURBO_MS = 25 * 60 * 1000; // com o item "Turbo Trabalhar" da loja
 const PESCAR_COOLDOWN_MS = 8 * 60 * 1000;
 const ROUBAR_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+const ROLETA_COOLDOWN_MS = 2 * 60 * 1000;
+const ROLETA_APOSTA_MIN = 100;
+const ROLETA_APOSTA_MAX = 5000;
+const PPT_APOSTA_MIN = 50;
+const PPT_APOSTA_MAX = 5000;
+
+function getTrabalharCooldown(data) {
+  return data.turboTrabalhar ? TRABALHAR_COOLDOWN_TURBO_MS : TRABALHAR_COOLDOWN_NORMAL_MS;
+}
 
 function formatarMoedas(valor) {
   return `${valor} 🪙`;
 }
 
 // =========================
-// LOJA
+// BAGUNCINHA STORE
 // =========================
-// Coloque aqui os itens que dá pra comprar com moedas.
-// roleId é opcional — se preencher, o item concede um cargo cosmético ao comprar.
-const SHOP_ITEMS = {
-  destaque: {
-    nome: "cargo membro VIP 👑",
-    preco: 3500,
-    roleId: "1371849692974944357" // ex: cargo de cor especial
+// Categorias e itens da loja. Preencha os "COLOQUE_..." com IDs reais de cargo
+// quando for usar. tipo decide o que acontece na hora da compra:
+//   "cargo"            -> dá um cargo cosmético
+//   "turbo_trabalhar"  -> reduz o cooldown do /trabalhar pra sempre
+//   "xp_boost"         -> dobra XP por 1h
+//   "caixa"            -> abre uma caixa misteriosa com prêmio aleatório
+//   "ticket"           -> dá 1 bilhete pro sorteio
+const LOJA_CATEGORIAS = {
+  boosts: { nome: "⚡ Boosts", descricao: "Vantagens permanentes ou temporárias." },
+  cargos: { nome: "👑 Cargos", descricao: "Cargos cosméticos pra se destacar." },
+  caixas: { nome: "📦 Caixas Misteriosas", descricao: "Aposta na sorte por uma recompensa aleatória." },
+  bilhetes: { nome: "🎫 Sorteio", descricao: "Bilhetes pra concorrer a prêmios do servidor." }
+};
+
+const LOJA_ITEMS = {
+  turbo_trabalhar: {
+    categoria: "boosts",
+    nome: "⏱️ Turbo Trabalhar",
+    preco: 3000,
+    descricao: "Reduz o cooldown do `/trabalhar` de 60 pra 25 minutos. Permanente.",
+    tipo: "turbo_trabalhar"
   },
-  vip: {
-    nome: "Cargo pirata 🏴‍☠️",
+  xp_boost: {
+    categoria: "boosts",
+    nome: "✨ XP Boost (2x por 1h)",
+    preco: 1500,
+    descricao: "Dobra o XP ganho (texto e voz) pela próxima 1 hora.",
+    tipo: "xp_boost"
+  },
+  cargo_vip: {
+    categoria: "cargos",
+    nome: "👑 Cargo VIP",
+    preco: 3500,
+    descricao: "Cargo cosmético de destaque no servidor.",
+    tipo: "cargo",
+    roleId: "1371849692974944357"
+  },
+  cargo_pirata: {
+    categoria: "cargos",
+    nome: "🏴‍☠️ Cargo Pirata",
     preco: 4500,
+    descricao: "Pra quem tá on pela zoeira.",
+    tipo: "cargo",
     roleId: "1530739542733230251"
+  },
+  cargo_neon: {
+    categoria: "cargos",
+    nome: " Cargo Neon",
+    preco: 6000,
+    descricao: "Cor de nome mais vibrante do servidor.",
+    tipo: "cargo",
+    roleId: "COLOQUE_O_ID_DO_CARGO_NEON_AQUI"
+  },
+  caixa_baguncinha: {
+    categoria: "caixas",
+    nome: "📦 Caixa baguncinha",
+    preco: 2000,
+    descricao: "Pode vir moedas, XP Boost, cargo temporário ou até item lendário.",
+    tipo: "caixa"
+  },
+  ticket_sorteio: {
+    categoria: "bilhetes",
+    nome: "🎫 Ticket de Sorteio",
+    preco: 500,
+    descricao: "1 bilhete = 1 chance no próximo sorteio (staff usa `/sortear`).",
+    tipo: "ticket"
   }
 };
+
+// =========================
+// CAIXA MISTERIOSA — TABELA DE RARIDADE
+// =========================
+// "peso" define a chance (peso maior = mais comum). Soma dos pesos = 100.
+// EV calibrado pra ficar abaixo do preço da caixa (2.000), mantendo a economia saudável.
+const CARGO_TEMPORARIO_ID = "COLOQUE_O_ID_DO_CARGO_TEMPORARIO_AQUI"; // cargo de 24h, prêmio ÉPICO
+const CAIXA_REWARDS = [
+  { raridade: "COMUM", peso: 40, tipo: "moedas", valor: 500 },
+  { raridade: "COMUM", peso: 25, tipo: "moedas", valor: 1000 },
+  { raridade: "RARO", peso: 15, tipo: "moedas", valor: 3000 },
+  { raridade: "RARO", peso: 10, tipo: "xp_boost", valor: null },
+  { raridade: "ÉPICO", peso: 6, tipo: "cargo_temporario", valor: null },
+  { raridade: "LENDÁRIO", peso: 3, tipo: "moedas", valor: 8000 },
+  { raridade: "???", peso: 1, tipo: "jackpot", valor: 20000 }
+];
+
+const CORES_RARIDADE = {
+  "COMUM": 0x95a5a6,
+  "RARO": 0x3498db,
+  "ÉPICO": 0x9b59b6,
+  "LENDÁRIO": 0xf1c40f,
+  "???": 0xe74c3c
+};
+
+function sortearRecompensaCaixa() {
+  const totalPeso = CAIXA_REWARDS.reduce((soma, item) => soma + item.peso, 0);
+  let sorteio = Math.random() * totalPeso;
+
+  for (const recompensa of CAIXA_REWARDS) {
+    if (sorteio < recompensa.peso) return recompensa;
+    sorteio -= recompensa.peso;
+  }
+
+  return CAIXA_REWARDS[0]; // fallback, nunca deveria chegar aqui
+}
+
+async function aplicarRecompensaCaixa(member, data, recompensa) {
+  let descricao = "";
+
+  if (recompensa.tipo === "moedas") {
+    data.coins += recompensa.valor;
+    descricao = `Você ganhou ${formatarMoedas(recompensa.valor)}!`;
+  } else if (recompensa.tipo === "xp_boost") {
+    const agora = Date.now();
+    data.xpBoostAte = Math.max(data.xpBoostAte, agora) + 60 * 60 * 1000;
+    descricao = "Você ganhou **XP Boost 2x por 1 hora**!";
+  } else if (recompensa.tipo === "cargo_temporario") {
+    if (CARGO_TEMPORARIO_ID.startsWith("COLOQUE_")) {
+      data.coins += 1000;
+      descricao = "Você ganharia um cargo temporário, mas ele ainda não foi configurado — ganhou 1.000 🪙 no lugar.";
+    } else {
+      await member.roles.add(CARGO_TEMPORARIO_ID).catch(() => {});
+      setTimeout(() => {
+        member.roles.remove(CARGO_TEMPORARIO_ID).catch(() => {});
+      }, 24 * 60 * 60 * 1000);
+      descricao = "Você ganhou um **cargo temporário por 24 horas**!";
+    }
+  } else if (recompensa.tipo === "jackpot") {
+    data.coins += recompensa.valor;
+    data.itemLendario = true;
+    descricao = `🎉 **JACKPOT SECRETO!** Você ganhou ${formatarMoedas(recompensa.valor)} e desbloqueou o item lendário místico!`;
+  }
+
+  return descricao;
+}
+
+// =========================
+// ROLETA BAGUNCINHA
+// =========================
+// Pesos calibrados pra deixar uma leve vantagem da casa (EV ~0.95x da aposta),
+// senão a roleta vira fonte infinita de moedas em vez de minigame.
+const ROLETA_RESULTADOS = [
+  { label: "💀 0x — Perdeu tudo", multiplicador: 0, peso: 35 },
+  { label: "😬 0.5x — Quase lá", multiplicador: 0.5, peso: 25 },
+  { label: "😐 1x — Empatou", multiplicador: 1, peso: 20 },
+  { label: "🎉 2x — Dobrou!", multiplicador: 2, peso: 14 },
+  { label: "🔥 5x — Grande vitória!", multiplicador: 5, peso: 5 },
+  { label: "💎 JACKPOT 10x!!!", multiplicador: 10, peso: 1 }
+];
+
+function sortearRoleta() {
+  const totalPeso = ROLETA_RESULTADOS.reduce((soma, item) => soma + item.peso, 0);
+  let sorteio = Math.random() * totalPeso;
+
+  for (const resultado of ROLETA_RESULTADOS) {
+    if (sorteio < resultado.peso) return resultado;
+    sorteio -= resultado.peso;
+  }
+
+  return ROLETA_RESULTADOS[0];
+}
+
+// =========================
+// CONQUISTAS
+// =========================
+// Cada conquista tem uma condição pra checar e uma recompensa. O usuário
+// roda /conquistas pra reivindicar as que já cumpriu — não é dado automático,
+// assim a pessoa volta a interagir com o bot em vez de só ganhar tudo passivo.
+const CONQUISTAS = {
+  veterano: {
+    nome: "🏆 Veterano",
+    descricao: "Fique 30 dias no servidor.",
+    condicao: member => Date.now() - member.joinedTimestamp >= 30 * 24 * 60 * 60 * 1000,
+    moedas: 5000,
+    roleId: "COLOQUE_O_ID_DO_CARGO_VETERANO_AQUI",
+    badge: "🎖️ Badge Veterano"
+  }
+};
+
+async function verificarConquistas(member, data) {
+  const desbloqueadas = [];
+
+  for (const [id, conquista] of Object.entries(CONQUISTAS)) {
+    if (data.conquistas.includes(id)) continue;
+    if (!conquista.condicao(member)) continue;
+
+    data.conquistas.push(id);
+    data.coins += conquista.moedas;
+
+    if (conquista.roleId && !conquista.roleId.startsWith("COLOQUE_")) {
+      await member.roles.add(conquista.roleId).catch(() => {});
+    }
+
+    desbloqueadas.push(conquista);
+  }
+
+  return desbloqueadas;
+}
+
+// =========================
+// UI DA LOJA (EMBED + BOTÕES)
+// =========================
+function montarEmbedLojaPrincipal() {
+  return new EmbedBuilder()
+    .setTitle("🎪 BAGUNCINHA STORE")
+    .setDescription(
+      "Escolha uma categoria no menu abaixo pra ver os itens.\n\n" +
+      Object.values(LOJA_CATEGORIAS).map(c => `${c.nome} — ${c.descricao}`).join("\n") +
+      "\n\n🏆 Tem conquistas te esperando também — dá uma olhada no `/conquistas`."
+    )
+    .setColor(0x9b59b6)
+    .setFooter({ text: "Baguncinha Store" });
+}
+
+function montarComponentesLojaPrincipal() {
+  const linhaCategoria = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("loja_categoria")
+      .setPlaceholder("📂 Escolher categoria")
+      .addOptions(
+        Object.entries(LOJA_CATEGORIAS).map(([id, cat]) => ({
+          label: cat.nome,
+          description: cat.descricao,
+          value: id
+        }))
+      )
+  );
+
+  return [linhaCategoria];
+}
+
+function montarEmbedLojaCategoria(categoriaId) {
+  const categoria = LOJA_CATEGORIAS[categoriaId];
+  const itensCategoria = Object.entries(LOJA_ITEMS).filter(([, item]) => item.categoria === categoriaId);
+
+  return new EmbedBuilder()
+    .setTitle(`${categoria.nome} — BAGUNCINHA STORE`)
+    .setDescription(
+      itensCategoria
+        .map(([, item]) => `**${item.nome}** — ${formatarMoedas(item.preco)}\n${item.descricao}`)
+        .join("\n\n")
+    )
+    .setColor(0x9b59b6)
+    .setFooter({ text: "Baguncinha Store" });
+}
+
+function montarComponentesLojaCategoria(categoriaId) {
+  const itensCategoria = Object.entries(LOJA_ITEMS).filter(([, item]) => item.categoria === categoriaId);
+
+  const linhasItens = [];
+  let linhaAtual = new ActionRowBuilder();
+
+  itensCategoria.forEach(([id, item], index) => {
+    if (index > 0 && index % 4 === 0) {
+      linhasItens.push(linhaAtual);
+      linhaAtual = new ActionRowBuilder();
+    }
+    linhaAtual.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`loja_comprar_${id}`)
+        .setLabel(`${item.nome} — ${item.preco}🪙`)
+        .setStyle(ButtonStyle.Primary)
+    );
+  });
+
+  if (linhaAtual.components.length > 0) linhasItens.push(linhaAtual);
+
+  const linhaVoltar = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("loja_voltar").setLabel("⬅️ Categorias").setStyle(ButtonStyle.Secondary)
+  );
+
+  return [...linhasItens, linhaVoltar];
+}
+
+async function comprarItem(interaction, itemId) {
+  const item = LOJA_ITEMS[itemId];
+
+  if (!item) {
+    await interaction.reply({ content: "❌ Esse item não existe.", ephemeral: true });
+    return;
+  }
+
+  const data = getUserData(interaction.user.id);
+
+  if (item.tipo === "turbo_trabalhar" && data.turboTrabalhar) {
+    await interaction.reply({ content: "❌ Você já tem o Turbo Trabalhar ativo.", ephemeral: true });
+    return;
+  }
+
+  if (data.coins < item.preco) {
+    await interaction.reply({
+      content: `❌ Faltam ${formatarMoedas(item.preco - data.coins)} pra comprar **${item.nome}**.`,
+      ephemeral: true
+    });
+    return;
+  }
+
+  data.coins -= item.preco;
+
+  if (item.tipo === "caixa") {
+    const recompensa = sortearRecompensaCaixa();
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    const descricaoPremio = await aplicarRecompensaCaixa(member, data, recompensa);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`📦 ${item.nome} — ${recompensa.raridade}`)
+      .setDescription(descricaoPremio)
+      .setColor(CORES_RARIDADE[recompensa.raridade] || 0x9b59b6);
+
+    salvarDados();
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+    return;
+  }
+
+  if (item.tipo === "ticket") {
+    data.ticketsSorteio += 1;
+    salvarDados();
+    await interaction.reply({
+      content: `🎫 Você comprou 1 ticket de sorteio! Total: **${data.ticketsSorteio}**.`,
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (item.tipo === "turbo_trabalhar") {
+    data.turboTrabalhar = true;
+    salvarDados();
+    await interaction.reply({
+      content: "✅ Comprado! Seu cooldown do `/trabalhar` agora é de **25 minutos**.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (item.tipo === "xp_boost") {
+    const agora = Date.now();
+    data.xpBoostAte = Math.max(data.xpBoostAte, agora) + 60 * 60 * 1000;
+    salvarDados();
+    await interaction.reply({ content: "✅ **XP Boost 2x** ativado por 1 hora!", ephemeral: true });
+    return;
+  }
+
+  if (item.tipo === "cargo") {
+    if (item.roleId.startsWith("COLOQUE_")) {
+      data.coins += item.preco;
+      await interaction.reply({
+        content: "❌ Esse cargo ainda não foi configurado pelo admin. Nada foi cobrado.",
+        ephemeral: true
+      });
+      return;
+    }
+
+    try {
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+      await member.roles.add(item.roleId);
+    } catch (error) {
+      console.error("❌ Erro ao dar cargo da loja:", error);
+    }
+
+    salvarDados();
+    await interaction.reply({ content: `✅ Você comprou **${item.nome}**! Aproveita.`, ephemeral: true });
+    return;
+  }
+}
+
+async function handleLojaInteraction(interaction) {
+  if (interaction.isStringSelectMenu() && interaction.customId === "loja_categoria") {
+    const categoriaId = interaction.values[0];
+    await interaction.update({
+      embeds: [montarEmbedLojaCategoria(categoriaId)],
+      components: montarComponentesLojaCategoria(categoriaId)
+    });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === "loja_voltar") {
+    await interaction.update({
+      embeds: [montarEmbedLojaPrincipal()],
+      components: montarComponentesLojaPrincipal()
+    });
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith("loja_comprar_")) {
+    const itemId = interaction.customId.replace("loja_comprar_", "");
+    await comprarItem(interaction, itemId);
+    return;
+  }
+}
+
+// =========================
+// PEDRA, PAPEL OU TESOURA (APOSTA ENTRE USUÁRIOS)
+// =========================
+const pptMatches = new Map(); // matchId -> { desafianteId, desafiadoId, aposta, status, escolhas }
+const PPT_OPCOES = { pedra: "🪨 Pedra", papel: "📄 Papel", tesoura: "✂️ Tesoura" };
+
+function resolverPpt(escolhaA, escolhaB) {
+  if (escolhaA === escolhaB) return "empate";
+  const vence = { pedra: "tesoura", papel: "pedra", tesoura: "papel" };
+  return vence[escolhaA] === escolhaB ? "A" : "B";
+}
+
+async function handlePptInteraction(interaction) {
+  const [, acao, matchId] = interaction.customId.split(":");
+  const match = pptMatches.get(matchId);
+
+  if (!match) {
+    await interaction.reply({ content: "❌ Esse desafio expirou ou não existe mais.", ephemeral: true });
+    return;
+  }
+
+  if (acao === "aceitar" || acao === "recusar") {
+    if (interaction.user.id !== match.desafiadoId) {
+      await interaction.reply({ content: "❌ Esse desafio não é seu.", ephemeral: true });
+      return;
+    }
+
+    if (acao === "recusar") {
+      pptMatches.delete(matchId);
+      await interaction.update({
+        content: `❌ ${interaction.user} recusou o desafio.`,
+        embeds: [],
+        components: []
+      });
+      return;
+    }
+
+    const desafianteData = getUserData(match.desafianteId);
+    const desafiadoData = getUserData(match.desafiadoId);
+
+    if (desafianteData.coins < match.aposta || desafiadoData.coins < match.aposta) {
+      pptMatches.delete(matchId);
+      await interaction.update({
+        content: "❌ Alguém não tem mais moedas suficientes pra essa aposta. Desafio cancelado.",
+        embeds: [],
+        components: []
+      });
+      return;
+    }
+
+    desafianteData.coins -= match.aposta;
+    desafiadoData.coins -= match.aposta;
+    match.status = "jogando";
+
+    const linhaEscolhas = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`ppt:escolha_pedra:${matchId}`).setLabel("🪨 Pedra").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`ppt:escolha_papel:${matchId}`).setLabel("📄 Papel").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`ppt:escolha_tesoura:${matchId}`).setLabel("✂️ Tesoura").setStyle(ButtonStyle.Secondary)
+    );
+
+    salvarDados();
+    await interaction.update({
+      content: `✅ Desafio aceito! Aposta de ${formatarMoedas(match.aposta)} cada.\nCliquem na escolha de vocês (só você vê sua própria confirmação).`,
+      embeds: [],
+      components: [linhaEscolhas]
+    });
+    return;
+  }
+
+  if (acao.startsWith("escolha_")) {
+    if (match.status !== "jogando") {
+      await interaction.reply({ content: "❌ Esse desafio ainda não começou ou já acabou.", ephemeral: true });
+      return;
+    }
+
+    if (interaction.user.id !== match.desafianteId && interaction.user.id !== match.desafiadoId) {
+      await interaction.reply({ content: "❌ Esse desafio não é seu.", ephemeral: true });
+      return;
+    }
+
+    if (match.escolhas[interaction.user.id]) {
+      await interaction.reply({ content: "❌ Você já escolheu.", ephemeral: true });
+      return;
+    }
+
+    const escolha = acao.replace("escolha_", "");
+    match.escolhas[interaction.user.id] = escolha;
+
+    await interaction.reply({
+      content: `✅ Você escolheu ${PPT_OPCOES[escolha]}. Aguardando o adversário...`,
+      ephemeral: true
+    });
+
+    const escolhaA = match.escolhas[match.desafianteId];
+    const escolhaB = match.escolhas[match.desafiadoId];
+
+    if (!escolhaA || !escolhaB) return;
+
+    const desafianteData = getUserData(match.desafianteId);
+    const desafiadoData = getUserData(match.desafiadoId);
+    const resultado = resolverPpt(escolhaA, escolhaB);
+
+    let textoResultado;
+    if (resultado === "empate") {
+      desafianteData.coins += match.aposta;
+      desafiadoData.coins += match.aposta;
+      textoResultado = `🤝 Empate! ${PPT_OPCOES[escolhaA]} x ${PPT_OPCOES[escolhaB]}. Moedas devolvidas pros dois.`;
+    } else if (resultado === "A") {
+      desafianteData.coins += match.aposta * 2;
+      textoResultado = `🏆 <@${match.desafianteId}> venceu! ${PPT_OPCOES[escolhaA]} bate ${PPT_OPCOES[escolhaB]}. Levou ${formatarMoedas(match.aposta * 2)}.`;
+    } else {
+      desafiadoData.coins += match.aposta * 2;
+      textoResultado = `🏆 <@${match.desafiadoId}> venceu! ${PPT_OPCOES[escolhaB]} bate ${PPT_OPCOES[escolhaA]}. Levou ${formatarMoedas(match.aposta * 2)}.`;
+    }
+
+    pptMatches.delete(matchId);
+    salvarDados();
+
+    await interaction.message.edit({
+      content: `🪨📄✂️ **Resultado do desafio**\n${textoResultado}`,
+      embeds: [],
+      components: []
+    }).catch(() => {});
+    return;
+  }
+}
 
 // =========================
 // COMANDOS
@@ -370,18 +902,18 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("loja")
-    .setDescription("Mostra os itens disponíveis pra comprar com moedas."),
+    .setDescription("Abre a Baguncinha Store em embed com botões pra comprar."),
 
   new SlashCommandBuilder()
     .setName("comprar")
-    .setDescription("Compra um item da loja.")
+    .setDescription("Compra um item da loja direto por comando.")
     .addStringOption(option =>
       option
         .setName("item")
         .setDescription("Item que você quer comprar")
         .setRequired(true)
         .addChoices(
-          ...Object.entries(SHOP_ITEMS).map(([id, item]) => ({
+          ...Object.entries(LOJA_ITEMS).map(([id, item]) => ({
             name: `${item.nome} (${item.preco} 🪙)`,
             value: id
           }))
@@ -408,6 +940,37 @@ const commands = [
           { name: "Coroa", value: "coroa" }
         )
     ),
+
+  new SlashCommandBuilder()
+    .setName("roleta")
+    .setDescription("Aposta moedas na Roleta Baguncinha.")
+    .addIntegerOption(option =>
+      option
+        .setName("quantidade")
+        .setDescription(`Quanto apostar (${ROLETA_APOSTA_MIN} a ${ROLETA_APOSTA_MAX})`)
+        .setRequired(true)
+        .setMinValue(ROLETA_APOSTA_MIN)
+        .setMaxValue(ROLETA_APOSTA_MAX)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("ppt")
+    .setDescription("Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.")
+    .addUserOption(option =>
+      option.setName("usuario").setDescription("Quem você desafia").setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("quantidade")
+        .setDescription(`Quanto apostar (${PPT_APOSTA_MIN} a ${PPT_APOSTA_MAX})`)
+        .setRequired(true)
+        .setMinValue(PPT_APOSTA_MIN)
+        .setMaxValue(PPT_APOSTA_MAX)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("conquistas")
+    .setDescription("Vê e reivindica suas conquistas do servidor."),
 
   new SlashCommandBuilder()
     .setName("jogos")
@@ -488,7 +1051,7 @@ const FOOTBALL_API_BASE = "https://v3.football.api-sports.io";
 const LIGAS_BRASIL = {
   serieA: { id: 71, nome: "Serie A", country: "Brazil" },
   serieB: { id: 72, nome: "Serie B", country: "Brazil" },
-  copaDoBrasil: { id: 73, nome: "Copa do Brazil", country: "Brazil" },
+  copaDoBrasil: { id: 73, nome: "Copa do Brasil", country: "Brazil" },
   libertadores: { id: 13, nome: "Libertadores", country: null },
   sulAmericana: { id: 11, nome: "Sudamericana", country: null }
 };
@@ -690,6 +1253,28 @@ client.once("ready", async () => {
   setInterval(tickVoiceXp, VOICE_XP_INTERVAL_MS);
   console.log(`🎙️ Rastreamento de XP por voz ativado (a cada ${VOICE_XP_INTERVAL_MS / 60000} min)`);
 
+  // A verificação é configurada ANTES do futebol de propósito: descobrirIdsFutebol()
+  // faz várias chamadas de API que podem demorar (até 10s de timeout cada). Se a
+  // verificação fosse configurada só depois, qualquer reação que chegasse nesse
+  // meio-tempo seria ignorada porque verificacaoMessageId ainda estaria null.
+  const guildVerificacao = client.guilds.cache.get(GUILD_ID);
+  if (guildVerificacao && !NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) {
+    const canalVerificacao = await ensureVerificacaoChannel(guildVerificacao);
+    if (canalVerificacao) {
+      const mensagem = await ensureVerificacaoMessage(canalVerificacao);
+      if (mensagem) {
+        verificacaoMessageId = mensagem.id;
+        console.log(`🔒 Sistema de verificação ativo (mensagem ${verificacaoMessageId}).`);
+      } else {
+        console.log("⚠️ Verificação NÃO ativa: não consegui criar/achar a mensagem de verificação.");
+      }
+    } else {
+      console.log("⚠️ Verificação NÃO ativa: não consegui criar/achar o canal #verificacao.");
+    }
+  } else {
+    console.log("⚠️ NAO_VERIFICADO_ROLE_ID não configurado — verificação desativada.");
+  }
+
   if (FOOTBALL_API_KEY) {
     const guild = client.guilds.cache.get(GUILD_ID);
     if (guild) {
@@ -704,20 +1289,6 @@ client.once("ready", async () => {
   } else {
     console.log("⚠️ API_FOOTBALL_KEY não configurada — avisos de futebol desativados.");
   }
-
-  const guildVerificacao = client.guilds.cache.get(GUILD_ID);
-  if (guildVerificacao && !NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) {
-    const canalVerificacao = await ensureVerificacaoChannel(guildVerificacao);
-    if (canalVerificacao) {
-      const mensagem = await ensureVerificacaoMessage(canalVerificacao);
-      if (mensagem) {
-        verificacaoMessageId = mensagem.id;
-        console.log("🔒 Sistema de verificação ativo.");
-      }
-    }
-  } else {
-    console.log("⚠️ NAO_VERIFICADO_ROLE_ID não configurado — verificação desativada.");
-  }
 });
 
 // =========================
@@ -729,18 +1300,30 @@ client.once("ready", async () => {
 // e perde o "Não Verificado", liberando o resto do servidor.
 const NAO_VERIFICADO_ROLE_ID = "1552496115566252082";
 
-// ⚠️ CORRIGIDO: a chave "pirataria" aqui precisa ser IDÊNTICA à chave usada em
-// INTEREST_ROLES lá embaixo. Antes estava "piratarias" (com S) e não batia com
-// "pirataria" (sem S) do INTEREST_ROLES — por isso o cargo de pirataria nunca
-// era dado quando alguém reagia com 🏴‍☠️.
+// A chave usada aqui precisa ser IDÊNTICA à chave em INTEREST_ROLES lá embaixo.
 const INTEREST_EMOJIS = {
-  "💬": "conversa",
-  "🪙": "apostas",
-  "🏴‍☠️": "pirataria"
+  "🎯": "valorant",
+  "⛏️": "minecraft",
+  "🔫": "cs",
+  "🧱": "roblox",
+  "💬": "geral"
 };
 
 const VERIFICACAO_MARCADOR = "verificacao-baguncinha";
 let verificacaoMessageId = null;
+
+// O Discord às vezes devolve o nome do emoji da reação SEM o "variation selector"
+// (o caractere invisível U+FE0F que alguns emojis, tipo ⛏️, carregam). Se a chave em
+// INTEREST_EMOJIS tiver o U+FE0F e a reação vier sem ele (ou vice-versa), o lookup
+// direto falha e a verificação simplesmente não faz nada pra aquele emoji.
+// normalizarEmoji() remove esse caractere dos dois lados antes de comparar.
+function normalizarEmoji(nome) {
+  return nome ? nome.replace(/\uFE0F/g, "") : nome;
+}
+
+const INTEREST_EMOJIS_NORMALIZADO = Object.fromEntries(
+  Object.entries(INTEREST_EMOJIS).map(([emoji, interesse]) => [normalizarEmoji(emoji), interesse])
+);
 
 // Acha o canal #verificacao, ou cria se não existir
 async function ensureVerificacaoChannel(guild) {
@@ -782,8 +1365,8 @@ async function ensureVerificacaoMessage(channel) {
       .setTitle("🔒 Verificação de acesso")
       .setDescription(
         "Bem-vindo(a) à Baguncinha! Pra liberar o acesso ao resto do servidor, reage aqui embaixo " +
-        "com o que você quer acompanhar:\n\n" +
-        " — valorant\n🪙 — Apostas & Economia\n🏴‍☠️ — Pirataria\n\n" +
+        "com o que você joga:\n\n" +
+        "🎯 — Valorant\n⛏️ — Minecraft\n🔫 — CS\n🧱 — Roblox\n💬 — Geral (só bater papo mesmo)\n\n" +
         "Assim que reagir com pelo menos um, seu acesso já é liberado na hora."
       )
       .setColor(0x5865f2)
@@ -825,11 +1408,14 @@ client.on("messageReactionAdd", async (reaction, user) => {
     }
   }
 
-  const interesse = INTEREST_EMOJIS[reaction.emoji.name];
+  const interesse = INTEREST_EMOJIS_NORMALIZADO[normalizarEmoji(reaction.emoji.name)];
   if (!interesse) return;
 
   const guild = reaction.message.guild;
-  const member = await guild.members.fetch(user.id).catch(() => null);
+  const member = await guild.members.fetch(user.id).catch(error => {
+    console.error("❌ Erro ao buscar membro pra verificação (confere se o 'Server Members Intent' tá ligado no Discord Developer Portal):", error.message);
+    return null;
+  });
   if (!member) return;
 
   const roleId = INTEREST_ROLES[interesse];
@@ -856,11 +1442,14 @@ client.on("messageReactionRemove", async (reaction, user) => {
     }
   }
 
-  const interesse = INTEREST_EMOJIS[reaction.emoji.name];
+  const interesse = INTEREST_EMOJIS_NORMALIZADO[normalizarEmoji(reaction.emoji.name)];
   if (!interesse) return;
 
   const guild = reaction.message.guild;
-  const member = await guild.members.fetch(user.id).catch(() => null);
+  const member = await guild.members.fetch(user.id).catch(error => {
+    console.error("❌ Erro ao buscar membro pra verificação (confere se o 'Server Members Intent' tá ligado no Discord Developer Portal):", error.message);
+    return null;
+  });
   if (!member) return;
 
   // Tira só o cargo de interesse — não bloqueia de novo o acesso já liberado
@@ -1136,6 +1725,18 @@ client.on("interactionCreate", async interaction => {
     return;
   }
 
+  // Componentes da Baguncinha Store
+  if (interaction.customId && interaction.customId.startsWith("loja_")) {
+    await handleLojaInteraction(interaction);
+    return;
+  }
+
+  // Componentes do Pedra, Papel ou Tesoura
+  if (interaction.customId && interaction.customId.startsWith("ppt:")) {
+    await handlePptInteraction(interaction);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -1176,12 +1777,12 @@ client.on("interactionCreate", async interaction => {
         "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
         "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal).\n" +
         "🤝 `/doar` — Doa moedas pra outra pessoa.\n" +
-        "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
-        "🛍️ `/comprar` — Compra um item da loja.\n" +
+        "🎪 `/loja` — Abre a Baguncinha Store em embed com botões.\n" +
+        "🛍️ `/comprar` — Compra um item da loja direto por comando.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
-        "⚽ `/jogos` — Próximos jogos (Série A, B, Copa do Brasil, Libertadores, Sul-Americana e Seleção).\n" +
-        "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin).\n" +
-        "🚧 `/bloquearcanais` — Bloqueia a visão dos canais pro cargo Não Verificado (só admin, roda uma vez)."
+        "🎰 `/roleta` — Aposta moedas na Roleta Baguncinha.\n" +
+        "🪨 `/ppt` — Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.\n" +
+        "🏆 `/conquistas` — Vê e reivindica suas conquistas do servidor.\n")
       );
       console.log("✅ /help respondido");
       return;
@@ -1439,8 +2040,9 @@ client.on("interactionCreate", async interaction => {
       const data = getUserData(interaction.user.id);
       const now = Date.now();
 
-      if (now - data.lastTrabalhar < TRABALHAR_COOLDOWN_MS) {
-        const restante = TRABALHAR_COOLDOWN_MS - (now - data.lastTrabalhar);
+      const trabalharCooldown = getTrabalharCooldown(data);
+      if (now - data.lastTrabalhar < trabalharCooldown) {
+        const restante = trabalharCooldown - (now - data.lastTrabalhar);
         const minutos = Math.ceil(restante / (60 * 1000));
         await interaction.reply({
           content: `⏳ Você já trabalhou hoje. Volta em ~${minutos} min.`,
@@ -1495,7 +2097,7 @@ client.on("interactionCreate", async interaction => {
       const deuNada = Math.random() < 0.25; // 25% de chance de não pegar nada
 
       if (deuNada) {
-        await interaction.reply("🎣 Você ficou horas na beira do rio e não fisgou nada. Sorte no próximo.");
+        await interaction.reply("🎣 Você ficou horas na beira do rio e não fisgou nada. Mais Sorte no próximo mn.");
         console.log("✅ /pescar respondido (nada)");
         return;
       }
@@ -1515,11 +2117,11 @@ client.on("interactionCreate", async interaction => {
       const alvo = interaction.options.getUser("usuario");
 
       if (alvo.id === interaction.user.id) {
-        await interaction.reply({ content: "❌ Não dá pra roubar de si mesmo, cria.", ephemeral: true });
+        await interaction.reply({ content: "❌ Não dá pra roubar de si mesmo, mn.", ephemeral: true });
         return;
       }
       if (alvo.bot) {
-        await interaction.reply({ content: "❌ Bot não anda com dinheiro, esquece.", ephemeral: true });
+        await interaction.reply({ content: "❌ ta achando que eu to duro?.", ephemeral: true });
         return;
       }
 
@@ -1580,11 +2182,11 @@ client.on("interactionCreate", async interaction => {
       const quantidade = interaction.options.getInteger("quantidade");
 
       if (alvo.id === interaction.user.id) {
-        await interaction.reply({ content: "❌ Não dá pra doar pra si mesmo, cria.", ephemeral: true });
+        await interaction.reply({ content: "❌ Não dá pra doar pra si mesmo mn (???).", ephemeral: true });
         return;
       }
       if (alvo.bot) {
-        await interaction.reply({ content: "❌ Bot não precisa de moeda, esquece.", ephemeral: true });
+        await interaction.reply({ content: "❌ ta me chamando de duro?.", ephemeral: true });
         return;
       }
 
@@ -1611,57 +2213,23 @@ client.on("interactionCreate", async interaction => {
     }
 
     // =========================
-    // LOJA
+    // LOJA (embed + botões)
     // =========================
     if (interaction.commandName === "loja") {
-      const linhas = Object.entries(SHOP_ITEMS).map(
-        ([id, item]) => `**${item.nome}** — ${formatarMoedas(item.preco)}\nUse \`/comprar item:${item.nome}\``
-      );
-
-      const embed = new EmbedBuilder()
-        .setTitle("🛒 Loja da quebrada")
-        .setDescription(linhas.join("\n\n"))
-        .setColor(0x9b59b6);
-
-      await interaction.reply({ embeds: [embed] });
+      await interaction.reply({
+        embeds: [montarEmbedLojaPrincipal()],
+        components: montarComponentesLojaPrincipal()
+      });
       console.log("✅ /loja respondido");
       return;
     }
 
     // =========================
-    // COMPRAR
+    // COMPRAR (atalho por comando)
     // =========================
     if (interaction.commandName === "comprar") {
       const itemId = interaction.options.getString("item");
-      const item = SHOP_ITEMS[itemId];
-
-      if (!item) {
-        await interaction.reply({ content: "❌ Esse item não existe.", ephemeral: true });
-        return;
-      }
-
-      const data = getUserData(interaction.user.id);
-
-      if (data.coins < item.preco) {
-        await interaction.reply({
-          content: `❌ Faltam ${formatarMoedas(item.preco - data.coins)} pra comprar **${item.nome}**.`,
-          ephemeral: true
-        });
-        return;
-      }
-
-      data.coins -= item.preco;
-
-      if (item.roleId && !item.roleId.startsWith("COLOQUE_")) {
-        try {
-          const member = await interaction.guild.members.fetch(interaction.user.id);
-          await member.roles.add(item.roleId);
-        } catch (error) {
-          console.error("❌ Erro ao dar cargo da loja:", error);
-        }
-      }
-
-      await interaction.reply(`✅ Você comprou **${item.nome}**! Aproveita.`);
+      await comprarItem(interaction, itemId);
       console.log("✅ /comprar respondido");
       return;
     }
@@ -1698,6 +2266,138 @@ client.on("interactionCreate", async interaction => {
       }
 
       console.log("✅ /apostar respondido");
+      return;
+    }
+
+    // =========================
+    // ROLETA
+    // =========================
+    if (interaction.commandName === "roleta") {
+      const quantidade = interaction.options.getInteger("quantidade");
+      const data = getUserData(interaction.user.id);
+      const now = Date.now();
+
+      if (now - data.lastRoleta < ROLETA_COOLDOWN_MS) {
+        const restante = ROLETA_COOLDOWN_MS - (now - data.lastRoleta);
+        const segundos = Math.ceil(restante / 1000);
+        await interaction.reply({
+          content: `⏳ A roleta ainda tá girando. Espera ~${segundos}s.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      if (data.coins < quantidade) {
+        await interaction.reply({
+          content: `❌ Você não tem ${formatarMoedas(quantidade)}. Sua carteira: ${formatarMoedas(data.coins)}.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      data.lastRoleta = now;
+      data.coins -= quantidade;
+
+      const resultado = sortearRoleta();
+      const premio = Math.floor(quantidade * resultado.multiplicador);
+      data.coins += premio;
+
+      salvarDados();
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎰 ROLETA BAGUNCINHA")
+        .setDescription(
+          `Você apostou ${formatarMoedas(quantidade)}.\n\n` +
+          `${resultado.label}\n\n` +
+          `Você ganhou: ${formatarMoedas(premio)}\n` +
+          `Saldo atual: ${formatarMoedas(data.coins)}`
+        )
+        .setColor(resultado.multiplicador >= 5 ? 0xf1c40f : resultado.multiplicador === 0 ? 0xe74c3c : 0x2ecc71);
+
+      await interaction.reply({ embeds: [embed] });
+      console.log("✅ /roleta respondido");
+      return;
+    }
+
+    // =========================
+    // PPT (PEDRA, PAPEL OU TESOURA)
+    // =========================
+    if (interaction.commandName === "ppt") {
+      const alvo = interaction.options.getUser("usuario");
+      const quantidade = interaction.options.getInteger("quantidade");
+
+      if (alvo.id === interaction.user.id) {
+        await interaction.reply({ content: "❌ Não dá pra desafiar você mesmo.", ephemeral: true });
+        return;
+      }
+      if (alvo.bot) {
+        await interaction.reply({ content: "❌ Bot não joga PPT.", ephemeral: true });
+        return;
+      }
+
+      const desafianteData = getUserData(interaction.user.id);
+      if (desafianteData.coins < quantidade) {
+        await interaction.reply({
+          content: `❌ Você não tem ${formatarMoedas(quantidade)}. Sua carteira: ${formatarMoedas(desafianteData.coins)}.`,
+          ephemeral: true
+        });
+        return;
+      }
+
+      const matchId = interaction.id;
+      pptMatches.set(matchId, {
+        desafianteId: interaction.user.id,
+        desafiadoId: alvo.id,
+        aposta: quantidade,
+        status: "aguardando",
+        escolhas: {}
+      });
+
+      const linhaBotoes = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`ppt:aceitar:${matchId}`).setLabel("✅ Aceitar").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`ppt:recusar:${matchId}`).setLabel("❌ Recusar").setStyle(ButtonStyle.Danger)
+      );
+
+      await interaction.reply({
+        content: `🪨📄✂️ ${interaction.user} desafiou ${alvo} para Pedra, Papel ou Tesoura apostando ${formatarMoedas(quantidade)}!\n${alvo}, aceita?`,
+        components: [linhaBotoes]
+      });
+
+      console.log("✅ /ppt respondido");
+      return;
+    }
+
+    // =========================
+    // CONQUISTAS
+    // =========================
+    if (interaction.commandName === "conquistas") {
+      const data = getUserData(interaction.user.id);
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+
+      const desbloqueadasAgora = await verificarConquistas(member, data);
+      salvarDados();
+
+      const linhas = Object.entries(CONQUISTAS).map(([id, conquista]) => {
+        const status = data.conquistas.includes(id) ? "✅" : "🔒";
+        return `${status} **${conquista.nome}** — ${conquista.descricao}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle(`🏆 Conquistas de ${interaction.user.username}`)
+        .setDescription(linhas.join("\n"))
+        .setColor(0xf1c40f);
+
+      if (desbloqueadasAgora.length > 0) {
+        embed.addFields({
+          name: "🎉 Novas conquistas desbloqueadas!",
+          value: desbloqueadasAgora
+            .map(c => `${c.badge} ${c.nome} — +${formatarMoedas(c.moedas)}`)
+            .join("\n")
+        });
+      }
+
+      await interaction.reply({ embeds: [embed] });
+      console.log("✅ /conquistas respondido");
       return;
     }
 
@@ -1893,15 +2593,19 @@ client.on("warn", warning => {
 // =========================
 // Cole aqui os IDs dos cargos que cada interesse libera.
 const INTEREST_ROLES = {
-  valorant: "1476004304690348117",   // ex: Notificações de Futebol
-  apostas: "1552517712956362812",   // ex: Fã de Apostas
-  pirataria: "1530739542733230251"  // ex: Pirata Oficial 🏴‍☠️
+  valorant: "1476004304690348117",
+  minecraft: "1553649152779485272",
+  cs: "1553649152779485272",
+  roblox: "1553649152779485272",
+  geral: "1373017679379828908"
 };
 
 const NOMES_INTERESSES = {
-  valorant: " valorant",
-  apostas: "🪙 Apostas & Economia",
-  pirataria: "🏴‍☠️ Pirataria"
+  valorant: "🎯 Valorant",
+  minecraft: "⛏️ Minecraft",
+  cs: "🔫 CS",
+  roblox: "🧱 Roblox",
+  geral: "💬 Geral"
 };
 
 // =========================
