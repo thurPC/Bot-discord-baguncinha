@@ -1893,9 +1893,9 @@ client.on("warn", warning => {
 // =========================
 // Cole aqui os IDs dos cargos que cada interesse libera.
 const INTEREST_ROLES = {
-  futebol: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Notificações de Futebol
-  apostas: "COLOQUE_O_ID_DO_CARGO_AQUI",   // ex: Fã de Apostas
-  pirataria: "COLOQUE_O_ID_DO_CARGO_AQUI"  // ex: Pirata Oficial 🏴‍☠️
+  futebol: "",   // ex: Notificações de Futebol
+  apostas: "1552517712956362812",   // ex: Fã de Apostas
+  pirataria: "1530739542733230251"  // ex: Pirata Oficial 🏴‍☠️
 };
 
 const NOMES_INTERESSES = {
