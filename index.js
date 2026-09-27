@@ -231,7 +231,7 @@ const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const TRABALHAR_COOLDOWN_NORMAL_MS = 60 * 60 * 1000;
 const TRABALHAR_COOLDOWN_TURBO_MS = 25 * 60 * 1000; // com o item "Turbo Trabalhar" da loja
 const PESCAR_COOLDOWN_MS = 8 * 60 * 1000;
-const ROUBAR_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+const ROUBAR_COOLDOWN_MS = 30 * 60 * 1000;
 const ROLETA_COOLDOWN_MS = 2 * 60 * 1000;
 const ROLETA_APOSTA_MIN = 100;
 const ROLETA_APOSTA_MAX = 5000;
@@ -268,7 +268,7 @@ const LOJA_ITEMS = {
     categoria: "boosts",
     nome: "⏱️ Turbo Trabalhar",
     preco: 3000,
-    descricao: "Reduz o cooldown do `/trabalhar` de 60 pra 25 minutos. Permanente.",
+    descricao: "Reduz o tempo do `/trabalhar` de 60 pra 25 minutos. Permanente.",
     tipo: "turbo_trabalhar"
   },
   xp_boost: {
@@ -298,7 +298,7 @@ const LOJA_ITEMS = {
     categoria: "cargos",
     nome: " Cargo Neon",
     preco: 6000,
-    descricao: "Cor de nome mais vibrante do servidor.",
+    descricao: "Cor de nome mais legal do servidor.",
     tipo: "cargo",
     roleId: "COLOQUE_O_ID_DO_CARGO_NEON_AQUI"
   },
@@ -390,12 +390,12 @@ async function aplicarRecompensaCaixa(member, data, recompensa) {
 // Pesos calibrados pra deixar uma leve vantagem da casa (EV ~0.95x da aposta),
 // senão a roleta vira fonte infinita de moedas em vez de minigame.
 const ROLETA_RESULTADOS = [
-  { label: "💀 0x — Perdeu tudo", multiplicador: 0, peso: 35 },
-  { label: "😬 0.5x — Quase lá", multiplicador: 0.5, peso: 25 },
-  { label: "😐 1x — Empatou", multiplicador: 1, peso: 20 },
+  { label: "❌ 0x — PERDEU TUDO", multiplicador: 0, peso: 35 },
+  { label: " 0.5x — Quase lá", multiplicador: 0.5, peso: 25 },
+  { label: " 1x — Empatou", multiplicador: 1, peso: 20 },
   { label: "🎉 2x — Dobrou!", multiplicador: 2, peso: 14 },
   { label: "🔥 5x — Grande vitória!", multiplicador: 5, peso: 5 },
-  { label: "💎 JACKPOT 10x!!!", multiplicador: 10, peso: 1 }
+  { label: "💎 JACKPOT 10X!!! 💎", multiplicador: 10, peso: 1 }
 ];
 
 function sortearRoleta() {
@@ -2121,7 +2121,7 @@ client.on("interactionCreate", async interaction => {
         return;
       }
       if (alvo.bot) {
-        await interaction.reply({ content: "❌ ta achando que eu to duro?.", ephemeral: true });
+        await interaction.reply({ content: "❌ ta achando que ta facil assim ė?.", ephemeral: true });
         return;
       }
 
