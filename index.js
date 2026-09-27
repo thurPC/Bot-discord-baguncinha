@@ -108,7 +108,7 @@ function getUserData(userId) {
       voiceLevel: 1,
       lastMessageTimestamp: 0,
       coins: 0,
-      lastDaily: 1,
+      lastDaily: 0,
       lastTrabalhar: 0,
       lastPescar: 0,
       lastRoubar: 0
@@ -437,6 +437,11 @@ const commands = [
         .setRequired(true)
         .setMinValue(0)
     )
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("bloquearcanais")
+    .setDescription("Bloqueia a visão de todos os canais pro cargo Não Verificado (roda uma vez, admin).")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 
 ].map(command => command.toJSON());
@@ -727,7 +732,7 @@ const NAO_VERIFICADO_ROLE_ID = "1552496115566252082";
 const INTEREST_EMOJIS = {
   "⚽": "futebol",
   "🪙": "apostas",
-  "🏴‍☠️": "pirataria"
+  "🏴‍☠️": "piratarias"
 };
 
 const VERIFICACAO_MARCADOR = "verificacao-baguncinha";
@@ -744,7 +749,7 @@ async function ensureVerificacaoChannel(guild) {
       channel = await guild.channels.create({
         name: "verificacao",
         type: ChannelType.GuildText,
-        topic: "🔒 Reaja aqui pra liberar acesso ao servidor"
+        topic: "🔒 Reaja aqui pra liberar seu acesso ao servidor"
       });
       console.log("✅ Canal #verificacao criado.");
     } catch (error) {
@@ -775,7 +780,7 @@ async function ensureVerificacaoMessage(channel) {
         "Bem-vindo(a) à Baguncinha! Pra liberar o acesso ao resto do servidor, reage aqui embaixo " +
         "com o que você quer acompanhar:\n\n" +
         "⚽ — Futebol\n🪙 — Apostas & Economia\n🏴‍☠️ — Pirataria\n\n" +
-        "Assim que reagir com pelo menos um, seu acesso sera liberado manin!."
+        "Assim que reagir com pelo menos um, seu acesso já é liberado na hora."
       )
       .setColor(0x5865f2)
       .setFooter({ text: VERIFICACAO_MARCADOR });
@@ -880,13 +885,13 @@ client.on("messageCreate", async message => {
 
   if (leveledUp) {
     message.channel
-      .send(`💬 Salve ${message.author}, você subiu seu **nível de texto ${updated.textLevel}**!`)
+      .send(`💬 Salve ${message.author}, você subiu pro **nível de texto ${updated.textLevel}**!`)
       .catch(() => {});
 
     const newRoleId = await updateLevelRole(message.guild, message.author.id, getTotalLevel(updated));
     if (newRoleId) {
       message.channel
-        .send(`🏅 ${message.author} desbloqueou o cargo <@&${newRoleId}> na marra!`)
+        .send(`🏅 ${message.author} desbloqueou o cargo <@&${newRoleId}> na correria!`)
         .catch(() => {});
     }
   }
@@ -925,7 +930,7 @@ async function tickVoiceXp() {
         const newRoleId = await updateLevelRole(guild, member.id, getTotalLevel(updated));
         if (newRoleId && announceChannel) {
           announceChannel
-            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> merece meu respeito!!`)
+            .send(`🏅 ${member} desbloqueou o cargo <@&${newRoleId}> na correria!`)
             .catch(() => {});
         }
       }
@@ -1170,7 +1175,7 @@ client.on("interactionCreate", async interaction => {
         "🛒 `/loja` — Vê os itens pra comprar com moedas.\n" +
         "🛍️ `/comprar` — Compra um item da loja.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
-        "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin)."
+        "🛠️ `/editarmoedas` — Adiciona, remove ou define moedas de alguém (só admin).\n" +
       );
       console.log("✅ /help respondido");
       return;
@@ -1229,7 +1234,7 @@ client.on("interactionCreate", async interaction => {
           { name: "Membros", value: `${guild.memberCount}`, inline: true },
           { name: "Cargos", value: `${guild.roles.cache.size}`, inline: true },
           { name: "Canais", value: `${guild.channels.cache.size}`, inline: true },
-          { name: "Fundada em", value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>` }
+          { name: "Fundado em", value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>` }
         )
         .setColor(0x5865f2);
 
@@ -1416,7 +1421,7 @@ client.on("interactionCreate", async interaction => {
       data.coins += ganho;
       data.lastDaily = now;
 
-      await interaction.reply(`🎁 Você resgatou seu daily e ganhou ${formatarMoedas(ganho)}!`);
+      await interaction.reply(`🎁 Você resgatou seu presente diario e ganhou ${formatarMoedas(ganho)}!`);
       console.log("✅ /daily respondido");
       return;
     }
@@ -1445,6 +1450,11 @@ client.on("interactionCreate", async interaction => {
         "fez um freela de design",
         "vendeu uns doce na praça",
         "trabalhou de flanelinha"
+        "trabalhou de ambulante"
+        "trabalhou de entregador da shopee"
+        "trabalhou de faxineiro(a)"
+        "trabalhou de jardineiro"
+        "trabalhou de ajudante de pedreiro"
       ];
       const trampo = TRAMPOS[Math.floor(Math.random() * TRAMPOS.length)];
       const ganho = Math.floor(Math.random() * 81) + 50; // 50 a 130
@@ -1564,11 +1574,11 @@ client.on("interactionCreate", async interaction => {
       const quantidade = interaction.options.getInteger("quantidade");
 
       if (alvo.id === interaction.user.id) {
-        await interaction.reply({ content: "❌ Não dá pra doar pra si mesmo, mn (???).", ephemeral: true });
+        await interaction.reply({ content: "❌ Não dá pra doar pra si mesmo, cria.", ephemeral: true });
         return;
       }
       if (alvo.bot) {
-        await interaction.reply({ content: "❌ NÃO preciso de moeda mn, ta tirando?.", ephemeral: true });
+        await interaction.reply({ content: "❌ Bot não precisa de moeda, esquece.", ephemeral: true });
         return;
       }
 
@@ -1576,7 +1586,7 @@ client.on("interactionCreate", async interaction => {
 
       if (doador.coins < quantidade) {
         await interaction.reply({
-          content: `❌ Você não tem esse valor (dinheiro imaginario é?) ${formatarMoedas(quantidade)} pra doar. Sua carteira: ${formatarMoedas(doador.coins)}.`,
+          content: `❌ Você não tem ${formatarMoedas(quantidade)} pra doar. Sua carteira: ${formatarMoedas(doador.coins)}.`,
           ephemeral: true
         });
         return;
@@ -1603,7 +1613,7 @@ client.on("interactionCreate", async interaction => {
       );
 
       const embed = new EmbedBuilder()
-        .setTitle("🛒 Loja baguncinha")
+        .setTitle("🛒 Loja da quebrada")
         .setDescription(linhas.join("\n\n"))
         .setColor(0x9b59b6);
 
@@ -1775,6 +1785,54 @@ client.on("interactionCreate", async interaction => {
         ephemeral: true
       });
       console.log("✅ /editarmoedas respondido");
+      return;
+    }
+
+    // =========================
+    // BLOQUEAR CANAIS (ADMIN)
+    // =========================
+    if (interaction.commandName === "bloquearcanais") {
+      if (NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) {
+        await interaction.reply({
+          content: "❌ Configura o NAO_VERIFICADO_ROLE_ID no código antes de usar isso.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const guild = interaction.guild;
+      const canalVerificacao = guild.channels.cache.find(
+        c => c.name === "verificacao" && c.type === ChannelType.GuildText
+      );
+
+      let sucesso = 0;
+      let falhas = 0;
+
+      for (const canal of guild.channels.cache.values()) {
+        if (canalVerificacao && canal.id === canalVerificacao.id) continue;
+        if (!canal.permissionOverwrites) continue;
+
+        try {
+          await canal.permissionOverwrites.edit(NAO_VERIFICADO_ROLE_ID, { ViewChannel: false });
+          sucesso++;
+        } catch (error) {
+          falhas++;
+        }
+      }
+
+      if (canalVerificacao) {
+        await canalVerificacao.permissionOverwrites
+          .edit(NAO_VERIFICADO_ROLE_ID, { ViewChannel: true })
+          .catch(() => {});
+      }
+
+      await interaction.editReply(
+        `✅ Bloqueado em ${sucesso} canal(is).` +
+        (falhas > 0 ? ` ⚠️ Falhou em ${falhas} (confere se meu cargo tá acima e se eu tenho "Gerenciar Cargos/Canais" lá).` : "")
+      );
+      console.log("✅ /bloquearcanais respondido");
       return;
     }
 
