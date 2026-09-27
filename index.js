@@ -734,7 +734,7 @@ const NAO_VERIFICADO_ROLE_ID = "1552496115566252082";
 // "pirataria" (sem S) do INTEREST_ROLES — por isso o cargo de pirataria nunca
 // era dado quando alguém reagia com 🏴‍☠️.
 const INTEREST_EMOJIS = {
-  "⚽": "futebol",
+  "💬": "conversa",
   "🪙": "apostas",
   "🏴‍☠️": "pirataria"
 };
@@ -783,7 +783,7 @@ async function ensureVerificacaoMessage(channel) {
       .setDescription(
         "Bem-vindo(a) à Baguncinha! Pra liberar o acesso ao resto do servidor, reage aqui embaixo " +
         "com o que você quer acompanhar:\n\n" +
-        "⚽ — Futebol\n🪙 — Apostas & Economia\n🏴‍☠️ — Pirataria\n\n" +
+        " — valorant\n🪙 — Apostas & Economia\n🏴‍☠️ — Pirataria\n\n" +
         "Assim que reagir com pelo menos um, seu acesso já é liberado na hora."
       )
       .setColor(0x5865f2)
@@ -1893,13 +1893,13 @@ client.on("warn", warning => {
 // =========================
 // Cole aqui os IDs dos cargos que cada interesse libera.
 const INTEREST_ROLES = {
-  futebol: "",   // ex: Notificações de Futebol
+  valorant: "1476004304690348117",   // ex: Notificações de Futebol
   apostas: "1552517712956362812",   // ex: Fã de Apostas
   pirataria: "1530739542733230251"  // ex: Pirata Oficial 🏴‍☠️
 };
 
 const NOMES_INTERESSES = {
-  futebol: "⚽ Futebol",
+  valorant: " valorant",
   apostas: "🪙 Apostas & Economia",
   pirataria: "🏴‍☠️ Pirataria"
 };
