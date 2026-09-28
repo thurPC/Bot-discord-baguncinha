@@ -1235,7 +1235,7 @@ const commands = [
     .setName("jogos")
     .setDescription("Mostra os próximos jogos do Brasileirão e da Seleção."),
 
-  new SlashCommandBuilder()
+  new ()
     .setName("editarmoedas")
     .setDescription("Adiciona, remove ou define as moedas de um usuário (admin).")
     .addUserOption(option =>
@@ -2277,9 +2277,9 @@ client.on("interactionCreate", async interaction => {
         "❓ `/help` — mostra todos os comandos.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
         "👤 `/userinfo` — Perfil completo da pessoa.\n" +
-        "🏠 `/serverinfo` — Os dados da nossa quebrada.\n" +
+        "🏠 `/serverinfo` — Os dados do nosso servidor.\n" +
         "🧹 `/clear` — Zera as mensagem (só staff).\n" +
-        "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
+        "⏰ `/lembrete` — Te dou um toque na hora programada.\n" +
         "📊 `/perfil` — Teu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
         "💰 `/rankmoedas` — Ranking de quem tem mais moedas.\n" +
@@ -2293,7 +2293,7 @@ client.on("interactionCreate", async interaction => {
         "🎪 `/loja` — Abre a Baguncinha Store em embed com botões.\n" +
         "🛍️ `/comprar` — Compra um item da loja direto por comando.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
-        "🎰 `/roleta` — Aposta moedas na Roleta Baguncinha.\n" +
+        "🎰 `/roleta` — Aposta moedas na Roleta.\n" +
         "🪨 `/ppt` — Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.\n" +
         "🏆 `/conquistas` — Vê e reivindica suas conquistas do servidor.\n"
       );
