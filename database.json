@@ -163,5 +163,25 @@
     "conquistas": [],
     "itemLendario": false,
     "milestonesAlcancados": []
+  },
+  "1471478631942590701": {
+    "textXp": 5,
+    "textLevel": 1,
+    "voiceXp": 0,
+    "voiceLevel": 1,
+    "lastMessageTimestamp": 1790590911408,
+    "coins": 0,
+    "lastDaily": 0,
+    "lastTrabalhar": 0,
+    "lastPescar": 0,
+    "lastRoubar": 0,
+    "lastRoleta": 0,
+    "presoAte": 0,
+    "turboTrabalhar": false,
+    "xpBoostAte": 0,
+    "ticketsSorteio": 0,
+    "conquistas": [],
+    "itemLendario": false,
+    "milestonesAlcancados": []
   }
 }
