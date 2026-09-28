@@ -71,29 +71,212 @@ const xpData = new Map(); // key: userId, value: { textXp, textLevel, voiceXp, v
 // some quando você faz um novo deploy (o container é recriado do zero).
 const DATA_FILE = path.join(__dirname, "database.json");
 
-function carregarDados() {
+// =========================
+// BACKUP PERMANENTE NO GITHUB
+// =========================
+// O disco do Render é apagado a cada deploy, então o progresso também é salvo
+// num arquivo dentro do seu repositório do GitHub, numa branch separada
+// (GITHUB_DATA_BRANCH, padrão "dados"). Branch separada = o Render NÃO faz
+// redeploy a cada salvamento (ele só observa a "main").
+//
+// Variáveis de ambiente no Render:
+//   GITHUB_TOKEN        (obrigatória) token com permissão de escrever em "Contents"
+//   GITHUB_REPO         (opcional)    padrão: thurPC/Bot-discord-baguncinha
+//   GITHUB_DATA_BRANCH  (opcional)    padrão: dados
+//
+// ⚠️ Repositório PÚBLICO = os dados (IDs do Discord e moedas) ficam visíveis pra
+// qualquer um. Se isso incomodar, aponte GITHUB_REPO pra um repositório PRIVADO.
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_REPO = process.env.GITHUB_REPO || "thurPC/Bot-discord-baguncinha";
+const GITHUB_DATA_BRANCH = process.env.GITHUB_DATA_BRANCH || "dados";
+const GITHUB_DATA_PATH = "database.json";
+const GITHUB_SAVE_INTERVAL_MS = 5 * 60 * 1000; // no máximo 1 commit a cada 5 min
+
+let githubSha = null;        // "versão" atual do arquivo no GitHub (necessária pra atualizar)
+let dadosAlterados = false;  // true = tem coisa nova que ainda não foi pro GitHub
+let salvandoGithub = false;  // evita dois salvamentos ao mesmo tempo
+let ultimoTextoEnviado = null; // conteúdo do último envio (pra não commitar sem mudança)
+
+async function githubRequest(metodo, caminho, corpo) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const resposta = await fetch(`https://api.github.com${caminho}`, {
+      method: metodo,
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "bot-baguncinha",
+        "Content-Type": "application/json"
+      },
+      body: corpo ? JSON.stringify(corpo) : undefined,
+      signal: controller.signal
+    });
+
+    let json = null;
+    try {
+      json = await resposta.json();
+    } catch {
+      json = null;
+    }
+
+    return { status: resposta.status, ok: resposta.ok, json };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Baixa o banco de dados do GitHub. Retorna o objeto, ou null se não existir ainda.
+async function githubCarregar() {
+  const r = await githubRequest(
+    "GET",
+    `/repos/${GITHUB_REPO}/contents/${GITHUB_DATA_PATH}?ref=${encodeURIComponent(GITHUB_DATA_BRANCH)}`
+  );
+
+  if (r.status === 404) return null; // branch ou arquivo ainda não existem
+
+  if (!r.ok) {
+    throw new Error(`GitHub respondeu ${r.status} ao carregar (${r.json?.message || "sem detalhes"})`);
+  }
+
+  githubSha = r.json.sha;
+  const texto = Buffer.from(r.json.content, "base64").toString("utf-8");
+  const objeto = JSON.parse(texto);
+  ultimoTextoEnviado = JSON.stringify(objeto, null, 2);
+  return objeto;
+}
+
+// Cria a branch de dados (a partir da main) se ela ainda não existir
+async function githubGarantirBranch() {
+  const existe = await githubRequest(
+    "GET",
+    `/repos/${GITHUB_REPO}/git/ref/heads/${encodeURIComponent(GITHUB_DATA_BRANCH)}`
+  );
+  if (existe.ok) return;
+
+  const main = await githubRequest("GET", `/repos/${GITHUB_REPO}/git/ref/heads/main`);
+  if (!main.ok) {
+    throw new Error(`Não achei a branch main no GitHub (${main.status}). Confere GITHUB_REPO e a permissão do token.`);
+  }
+
+  const criada = await githubRequest("POST", `/repos/${GITHUB_REPO}/git/refs`, {
+    ref: `refs/heads/${GITHUB_DATA_BRANCH}`,
+    sha: main.json.object.sha
+  });
+
+  if (!criada.ok && criada.status !== 422) {
+    throw new Error(`Não consegui criar a branch "${GITHUB_DATA_BRANCH}" (${criada.status}).`);
+  }
+
+  console.log(`🌿 Branch "${GITHUB_DATA_BRANCH}" criada no GitHub.`);
+}
+
+async function githubSalvar() {
+  if (!GITHUB_TOKEN || salvandoGithub) return;
+
+  salvandoGithub = true;
+  dadosAlterados = false; // se alguém mexer durante o envio, vira true de novo
+
+  try {
+    const texto = JSON.stringify(Object.fromEntries(xpData), null, 2);
+
+    // nada mudou desde o último envio? então não gasta um commit à toa
+    if (texto === ultimoTextoEnviado) {
+      return;
+    }
+
+    const conteudo = Buffer.from(texto).toString("base64");
+
+    if (githubSha === null) {
+      await githubGarantirBranch();
+
+      // pode já existir um arquivo lá que a gente ainda não conhecia — pega o sha dele
+      const atual = await githubRequest(
+        "GET",
+        `/repos/${GITHUB_REPO}/contents/${GITHUB_DATA_PATH}?ref=${encodeURIComponent(GITHUB_DATA_BRANCH)}`
+      );
+      if (atual.ok) githubSha = atual.json.sha;
+    }
+
+    const enviar = () =>
+      githubRequest("PUT", `/repos/${GITHUB_REPO}/contents/${GITHUB_DATA_PATH}`, {
+        message: `backup automático (${xpData.size} usuários)`,
+        content: conteudo,
+        branch: GITHUB_DATA_BRANCH,
+        ...(githubSha ? { sha: githubSha } : {})
+      });
+
+    let r = await enviar();
+
+    // Se o sha estava desatualizado, busca o atual e tenta uma vez de novo
+    if (r.status === 409 || r.status === 422) {
+      const atual = await githubRequest(
+        "GET",
+        `/repos/${GITHUB_REPO}/contents/${GITHUB_DATA_PATH}?ref=${encodeURIComponent(GITHUB_DATA_BRANCH)}`
+      );
+      githubSha = atual.ok ? atual.json.sha : null;
+      r = await enviar();
+    }
+
+    if (!r.ok) {
+      throw new Error(`GitHub respondeu ${r.status} ao salvar (${r.json?.message || "sem detalhes"})`);
+    }
+
+    githubSha = r.json.content.sha;
+    ultimoTextoEnviado = texto;
+    console.log(`☁️ Progresso salvo no GitHub (${xpData.size} usuário(s)).`);
+  } catch (error) {
+    dadosAlterados = true; // tenta de novo no próximo ciclo
+    console.error("❌ Erro ao salvar no GitHub:", error.message);
+  } finally {
+    salvandoGithub = false;
+  }
+}
+
+function aplicarDadosCarregados(objeto) {
+  for (const [userId, dadosUsuario] of Object.entries(objeto)) {
+    xpData.set(userId, dadosUsuario);
+  }
+}
+
+async function carregarDados() {
+  // 1) GitHub é a fonte principal (sobrevive a deploy)
+  if (GITHUB_TOKEN) {
+    try {
+      const doGithub = await githubCarregar();
+      if (doGithub) {
+        aplicarDadosCarregados(doGithub);
+        console.log(`☁️ Banco de dados carregado do GitHub (${xpData.size} usuário(s)).`);
+        return;
+      }
+      console.log("☁️ Ainda não tem backup no GitHub — vai ser criado no primeiro salvamento.");
+    } catch (error) {
+      console.error("❌ Erro ao carregar do GitHub (tentando o arquivo local):", error.message);
+    }
+  } else {
+    console.log("⚠️ GITHUB_TOKEN não configurado — o progresso só fica salvo no disco do Render (some a cada deploy).");
+  }
+
+  // 2) Plano B: arquivo local
   try {
     if (fs.existsSync(DATA_FILE)) {
-      const bruto = fs.readFileSync(DATA_FILE, "utf-8");
-      const objeto = JSON.parse(bruto);
-
-      for (const [userId, dadosUsuario] of Object.entries(objeto)) {
-        xpData.set(userId, dadosUsuario);
-      }
-
-      console.log(`💾 Banco de dados carregado (${xpData.size} usuário(s)).`);
+      aplicarDadosCarregados(JSON.parse(fs.readFileSync(DATA_FILE, "utf-8")));
+      console.log(`💾 Banco de dados carregado do disco (${xpData.size} usuário(s)).`);
     } else {
       console.log("💾 Nenhum banco de dados encontrado, começando do zero.");
     }
   } catch (error) {
-    console.error("❌ Erro ao carregar banco de dados:", error);
+    console.error("❌ Erro ao carregar banco de dados local:", error);
   }
 }
 
+// Salva no disco na hora e marca pra subir pro GitHub no próximo ciclo
 function salvarDados() {
   try {
     const objeto = Object.fromEntries(xpData);
     fs.writeFileSync(DATA_FILE, JSON.stringify(objeto, null, 2));
+    dadosAlterados = true;
   } catch (error) {
     console.error("❌ Erro ao salvar banco de dados:", error);
   }
@@ -113,12 +296,13 @@ function getUserData(userId) {
       lastPescar: 0,
       lastRoubar: 0,
       lastRoleta: 0,           // cooldown da /roleta
-      presoAte: 0,             // timestamp — enquanto Date.now() < isso, tá "preso" (roubo malsucedido)
+      presoAte: 0,             // timestamp — enquanto Date.now() < isso, não dá pra trabalhar/pescar/roubar
       turboTrabalhar: false,   // true depois de comprar o item que reduz o cooldown do /trabalhar
       xpBoostAte: 0,           // timestamp — enquanto Date.now() < isso, XP em dobro
       ticketsSorteio: 0,       // quantos bilhetes de sorteio a pessoa tem
       conquistas: [],          // ids de conquistas já desbloqueadas
-      itemLendario: false      // flag de quem já tirou o prêmio raro da caixa/roleta
+      itemLendario: false,     // flag de quem já tirou o prêmio raro da caixa/roleta
+      milestonesAlcancados: [] // marcos de moeda (10k, 20k...) já anunciados/recompensados
     });
   }
 
@@ -131,6 +315,7 @@ function getUserData(userId) {
   if (data.ticketsSorteio === undefined) data.ticketsSorteio = 0;
   if (data.conquistas === undefined) data.conquistas = [];
   if (data.itemLendario === undefined) data.itemLendario = false;
+  if (data.milestonesAlcancados === undefined) data.milestonesAlcancados = [];
 
   return data;
 }
@@ -234,7 +419,7 @@ const TRABALHAR_COOLDOWN_NORMAL_MS = 60 * 60 * 1000;
 const TRABALHAR_COOLDOWN_TURBO_MS = 25 * 60 * 1000; // com o item "Turbo Trabalhar" da loja
 const PESCAR_COOLDOWN_MS = 8 * 60 * 1000;
 const ROUBAR_COOLDOWN_MS = 20 * 60 * 1000;
-const ROUBAR_PRISAO_MS = 15 * 60 * 1000; // tempo preso quando o roubo dá errado
+const PRISAO_MS = 15 * 60 * 1000; // tempo preso ao falhar um roubo
 const ROLETA_COOLDOWN_MS = 1 * 60 * 1000;
 const ROLETA_APOSTA_MIN = 100;
 const ROLETA_APOSTA_MAX = 5000;
@@ -245,77 +430,70 @@ function getTrabalharCooldown(data) {
   return data.turboTrabalhar ? TRABALHAR_COOLDOWN_TURBO_MS : TRABALHAR_COOLDOWN_NORMAL_MS;
 }
 
-// Quanto tempo ainda falta pra pessoa sair da prisão (0 se já não tá presa)
-function getPrisaoRestante(data) {
-  const restante = data.presoAte - Date.now();
-  return restante > 0 ? restante : 0;
-}
-
 function formatarMoedas(valor) {
   return `${valor} 🪙`;
 }
 
-// =========================
-// META DE MOEDAS DO SERVIDOR (10k, 20k, 30k...)
-// =========================
-// Cada meta (10.000, 20.000, 30.000...) só é anunciada e recompensada UMA VEZ pra
-// todo o servidor: a primeira pessoa a alcançar aquele total leva o prêmio, e as
-// metas já batidas ficam salvas num arquivo à parte pra sobreviver a reinícios.
-const METAS_FILE = path.join(__dirname, "metas.json");
-const METAS_TIER_MS = 10000; // de 10 em 10 mil moedas
-const metasBatidas = new Set(); // valores de meta (10000, 20000, ...) já anunciados
+// Bloqueia trabalhar/pescar/roubar enquanto a pessoa tá "presa" por ter falhado um roubo.
+// Retorna a mensagem de erro pronta, ou null se a pessoa não tá presa.
+function checarPrisao(data) {
+  const restante = data.presoAte - Date.now();
+  if (restante <= 0) return null;
 
-function carregarMetas() {
-  try {
-    if (fs.existsSync(METAS_FILE)) {
-      const bruto = fs.readFileSync(METAS_FILE, "utf-8");
-      const lista = JSON.parse(bruto);
-      lista.forEach(valor => metasBatidas.add(valor));
-      console.log(`🏁 Metas de moedas carregadas (${metasBatidas.size} já batida(s)).`);
+  const minutos = Math.ceil(restante / 60000);
+  return `🚔 Você tá preso ainda! Nada de trabalhar, pescar ou roubar por mais ~${minutos} min.`;
+}
+
+// =========================
+// MARCOS DE MOEDAS DO SERVIDOR
+// =========================
+// A cada 10.000 moedas acumuladas, o bot anuncia e dá uma recompensa — só uma vez
+// por marco por pessoa. Recompensa cresce 3.000 a cada marco: 10k->1k, 20k->4k, 30k->7k...
+const MOEDA_MARCO_INTERVALO = 10000;
+
+function calcularRecompensaMarco(marco) {
+  const n = marco / MOEDA_MARCO_INTERVALO; // 1, 2, 3...
+  return 1000 + (n - 1) * 3000;
+}
+
+async function verificarMarcosMoedas(guild, userId, data) {
+  if (!guild) return;
+  if (!data.milestonesAlcancados) data.milestonesAlcancados = [];
+
+  let seguranca = 0;
+
+  // Loop porque a própria recompensa pode empurrar a pessoa pro próximo marco também
+  while (seguranca < 20) {
+    seguranca++;
+
+    const marcoMaximoAtingido = Math.floor(data.coins / MOEDA_MARCO_INTERVALO) * MOEDA_MARCO_INTERVALO;
+    if (marcoMaximoAtingido <= 0) break;
+
+    let proximoMarco = null;
+    for (let m = MOEDA_MARCO_INTERVALO; m <= marcoMaximoAtingido; m += MOEDA_MARCO_INTERVALO) {
+      if (!data.milestonesAlcancados.includes(m)) {
+        proximoMarco = m;
+        break;
+      }
     }
-  } catch (error) {
-    console.error("❌ Erro ao carregar metas de moedas:", error);
-  }
-}
 
-function salvarMetas() {
-  try {
-    fs.writeFileSync(METAS_FILE, JSON.stringify([...metasBatidas], null, 2));
-  } catch (error) {
-    console.error("❌ Erro ao salvar metas de moedas:", error);
-  }
-}
+    if (proximoMarco === null) break;
 
-// 10k -> 1.000 / 20k -> 4.000 / 30k -> 7.000 / 40k -> 10.000 ... (+3.000 a cada meta)
-function calcularRecompensaMeta(meta) {
-  const tier = meta / METAS_TIER_MS;
-  return 1000 + (tier - 1) * 3000;
-}
-
-// Confere se o saldo atual cruzou alguma meta nova de 10 em 10 mil. Se sim, dá a
-// recompensa e anuncia no canal onde o comando foi usado — mas só pra quem chega
-// primeiro em cada meta; quem chega depois não ganha nem gera novo anúncio.
-async function verificarMetaMoedas(canal, userId, data) {
-  const metaAtingivel = Math.floor(data.coins / METAS_TIER_MS) * METAS_TIER_MS;
-  if (metaAtingivel < METAS_TIER_MS) return;
-
-  for (let meta = METAS_TIER_MS; meta <= metaAtingivel; meta += METAS_TIER_MS) {
-    if (metasBatidas.has(meta)) continue;
-
-    metasBatidas.add(meta);
-    salvarMetas();
-
-    const recompensa = calcularRecompensaMeta(meta);
+    data.milestonesAlcancados.push(proximoMarco);
+    const recompensa = calcularRecompensaMarco(proximoMarco);
     data.coins += recompensa;
 
+    const canal = guild.systemChannel;
     if (canal) {
-      canal
-        .send(
-          `🏁 **META DO SERVIDOR BATIDA!**\n` +
-          `<@${userId}> foi a primeira pessoa a passar de **${meta.toLocaleString("pt-BR")} 🪙** no servidor!\n` +
-          `🎁 Recompensa: ${formatarMoedas(recompensa)}`
+      const embed = new EmbedBuilder()
+        .setTitle("💰 Novo marco de moedas!")
+        .setDescription(
+          `<@${userId}> chegou em **${proximoMarco.toLocaleString("pt-BR")} moedas** no servidor! 🎉\n` +
+          `Recompensa por bater essa meta: ${formatarMoedas(recompensa)}`
         )
-        .catch(() => {});
+        .setColor(0xf1c40f);
+
+      canal.send({ embeds: [embed] }).catch(() => {});
     }
   }
 }
@@ -370,7 +548,7 @@ const LOJA_ITEMS = {
   },
   cargo_neon: {
     categoria: "cargos",
-    nome: " Cargo Neon",
+    nome: "🌈 Cargo Neon",
     preco: 6000,
     descricao: "Cor de nome mais legal do servidor.",
     tipo: "cargo",
@@ -465,8 +643,8 @@ async function aplicarRecompensaCaixa(member, data, recompensa) {
 // senão a roleta vira fonte infinita de moedas em vez de minigame.
 const ROLETA_RESULTADOS = [
   { label: "❌ 0x — PERDEU TUDO", multiplicador: 0, peso: 35 },
-  { label: " 0.5x — Quase lá", multiplicador: 0.5, peso: 25 },
-  { label: " 1x — Empatou", multiplicador: 1, peso: 20 },
+  { label: "🔸 0.5x — Quase lá", multiplicador: 0.5, peso: 25 },
+  { label: "🔹 1x — Empatou", multiplicador: 1, peso: 20 },
   { label: "🎉 2x — Dobrou!", multiplicador: 2, peso: 14 },
   { label: "🔥 5x — Grande vitória!", multiplicador: 5, peso: 5 },
   { label: "💎 JACKPOT 10X!!! 💎", multiplicador: 10, peso: 1 }
@@ -626,13 +804,12 @@ async function comprarItem(interaction, itemId) {
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     const descricaoPremio = await aplicarRecompensaCaixa(member, data, recompensa);
 
-    await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
-
     const embed = new EmbedBuilder()
       .setTitle(`📦 ${item.nome} — ${recompensa.raridade}`)
       .setDescription(descricaoPremio)
       .setColor(CORES_RARIDADE[recompensa.raridade] || 0x9b59b6);
 
+    await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
     salvarDados();
     await interaction.reply({ embeds: [embed], ephemeral: true });
     return;
@@ -823,20 +1000,19 @@ async function handlePptInteraction(interaction) {
       textoResultado = `🤝 Empate! ${PPT_OPCOES[escolhaA]} x ${PPT_OPCOES[escolhaB]}. Moedas devolvidas pros dois.`;
     } else if (resultado === "A") {
       desafianteData.coins += match.aposta * 2;
+      await verificarMarcosMoedas(interaction.guild, match.desafianteId, desafianteData);
       textoResultado = `🏆 <@${match.desafianteId}> venceu! ${PPT_OPCOES[escolhaA]} bate ${PPT_OPCOES[escolhaB]}. Levou ${formatarMoedas(match.aposta * 2)}.`;
     } else {
       desafiadoData.coins += match.aposta * 2;
+      await verificarMarcosMoedas(interaction.guild, match.desafiadoId, desafiadoData);
       textoResultado = `🏆 <@${match.desafiadoId}> venceu! ${PPT_OPCOES[escolhaB]} bate ${PPT_OPCOES[escolhaA]}. Levou ${formatarMoedas(match.aposta * 2)}.`;
     }
-
-    await verificarMetaMoedas(interaction.channel, match.desafianteId, desafianteData);
-    await verificarMetaMoedas(interaction.channel, match.desafiadoId, desafiadoData);
 
     pptMatches.delete(matchId);
     salvarDados();
 
     await interaction.message.edit({
-      content: ` #Resultado do desafio\n${textoResultado}`,
+      content: `📢 Resultado do desafio\n${textoResultado}`,
       embeds: [],
       components: []
     }).catch(() => {});
@@ -1853,13 +2029,13 @@ client.on("interactionCreate", async interaction => {
         "⏰ `/lembrete` — Te dou um toque na hora certa.\n" +
         "📊 `/perfil` — Teu nível e XP no servidor.\n" +
         "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
-        "💰 `/rankmoedas` — Ranking de quem tem mais moedas no servidor.\n" +
+        "💰 `/rankmoedas` — Ranking de quem tem mais moedas.\n" +
         "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
         "💰 `/carteira` — Vê quantas moedas você tem.\n" +
         "🎁 `/daily` — Recompensa diária de moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
         "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
-        "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal e ir preso).\n" +
+        "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal e ir PRESO).\n" +
         "🤝 `/doar` — Doa moedas pra outra pessoa.\n" +
         "🎪 `/loja` — Abre a Baguncinha Store em embed com botões.\n" +
         "🛍️ `/comprar` — Compra um item da loja direto por comando.\n" +
@@ -2001,7 +2177,7 @@ client.on("interactionCreate", async interaction => {
     }
 
     // =========================
-    // RANK (LEADERBOARD DE XP)
+    // RANK (LEADERBOARD)
     // =========================
     if (interaction.commandName === "rank") {
       const ranking = [...xpData.entries()]
@@ -2048,16 +2224,15 @@ client.on("interactionCreate", async interaction => {
     }
 
     // =========================
-    // RANKMOEDAS (LEADERBOARD DE MOEDAS)
+    // RANK DE MOEDAS
     // =========================
     if (interaction.commandName === "rankmoedas") {
       const ranking = [...xpData.entries()]
-        .filter(([, data]) => (data.coins || 0) > 0)
-        .sort((a, b) => (b[1].coins || 0) - (a[1].coins || 0))
+        .sort((a, b) => b[1].coins - a[1].coins)
         .slice(0, 10);
 
       if (ranking.length === 0) {
-        await interaction.reply("Ninguém tem moeda nenhuma ainda. Vai trabalhar, cria!");
+        await interaction.reply("Ninguém tem moeda nenhuma ainda. Usa `/daily` ou `/trabalhar`!");
         return;
       }
 
@@ -2071,16 +2246,14 @@ client.on("interactionCreate", async interaction => {
         const user = usuarios[index];
         const nome = user ? user.username : "Usuário desconhecido";
         const posicao = MEDALHAS[index] || `**${index + 1}.**`;
-
         return `${posicao} **${nome}** — ${formatarMoedas(data.coins)}`;
       });
 
       const embed = new EmbedBuilder()
-        .setTitle("💰 Ranking de moedas da Baguncinha")
+        .setTitle("💰 Ranking de Moedas")
         .setDescription(linhas.join("\n"))
         .setColor(0xf1c40f)
-        .setThumbnail(usuarios[0]?.displayAvatarURL({ size: 256 }) || null)
-        .setFooter({ text: `Top ${ranking.length} mais ricos do servidor` });
+        .setThumbnail(usuarios[0]?.displayAvatarURL({ size: 256 }) || null);
 
       await interaction.reply({ embeds: [embed] });
       console.log("✅ /rankmoedas respondido");
@@ -2152,7 +2325,7 @@ client.on("interactionCreate", async interaction => {
       data.coins += ganho;
       data.lastDaily = now;
 
-      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
       salvarDados();
 
       await interaction.reply(`🎁 Você resgatou seu presente diario e ganhou ${formatarMoedas(ganho)}!`);
@@ -2167,13 +2340,9 @@ client.on("interactionCreate", async interaction => {
       const data = getUserData(interaction.user.id);
       const now = Date.now();
 
-      const prisaoRestante = getPrisaoRestante(data);
-      if (prisaoRestante > 0) {
-        const minutosPreso = Math.ceil(prisaoRestante / (60 * 1000));
-        await interaction.reply({
-          content: `🚔 Você tá preso por causa daquele roubo malsucedido! Sai em ~${minutosPreso} min.`,
-          ephemeral: true
-        });
+      const mensagemPrisao = checarPrisao(data);
+      if (mensagemPrisao) {
+        await interaction.reply({ content: mensagemPrisao, ephemeral: true });
         return;
       }
 
@@ -2207,7 +2376,7 @@ client.on("interactionCreate", async interaction => {
       data.coins += ganho;
       data.lastTrabalhar = now;
 
-      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
       salvarDados();
 
       await interaction.reply(`💼 Você ${trampo} e faturou ${formatarMoedas(ganho)}.`);
@@ -2222,13 +2391,9 @@ client.on("interactionCreate", async interaction => {
       const data = getUserData(interaction.user.id);
       const now = Date.now();
 
-      const prisaoRestante = getPrisaoRestante(data);
-      if (prisaoRestante > 0) {
-        const minutosPreso = Math.ceil(prisaoRestante / (60 * 1000));
-        await interaction.reply({
-          content: `🚔 Você tá preso por causa daquele roubo malsucedido! Sai em ~${minutosPreso} min.`,
-          ephemeral: true
-        });
+      const mensagemPrisao = checarPrisao(data);
+      if (mensagemPrisao) {
+        await interaction.reply({ content: mensagemPrisao, ephemeral: true });
         return;
       }
 
@@ -2255,7 +2420,7 @@ client.on("interactionCreate", async interaction => {
       const ganho = Math.floor(Math.random() * 91) + 20; // 20 a 110
       data.coins += ganho;
 
-      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
       salvarDados();
 
       await interaction.reply(`🎣 Fisgou um peixe daora e vendeu por ${formatarMoedas(ganho)}!`);
@@ -2282,13 +2447,9 @@ client.on("interactionCreate", async interaction => {
       const vitima = getUserData(alvo.id);
       const now = Date.now();
 
-      const prisaoRestante = getPrisaoRestante(ladrao);
-      if (prisaoRestante > 0) {
-        const minutosPreso = Math.ceil(prisaoRestante / (60 * 1000));
-        await interaction.reply({
-          content: `🚔 Você tá preso! Sai em ~${minutosPreso} min antes de tentar outra roubada.`,
-          ephemeral: true
-        });
+      const mensagemPrisao = checarPrisao(ladrao);
+      if (mensagemPrisao) {
+        await interaction.reply({ content: mensagemPrisao, ephemeral: true });
         return;
       }
 
@@ -2321,21 +2482,22 @@ client.on("interactionCreate", async interaction => {
         vitima.coins -= roubado;
         ladrao.coins += roubado;
 
-        await verificarMetaMoedas(interaction.channel, interaction.user.id, ladrao);
+        await verificarMarcosMoedas(interaction.guild, interaction.user.id, ladrao);
         salvarDados();
 
         await interaction.reply(
           `🕵️ Deu certo! Você roubou ${formatarMoedas(roubado)} de ${alvo.username}.`
         );
       } else {
-        const multa = Math.floor(Math.random() * (300 - 80 + 1)) + 80; // perde 80 a 300
+        const multa = Math.floor(Math.random() * 221) + 80; // perde 80 a 300
         ladrao.coins -= multa; // pode ficar negativo se não tiver o suficiente
-        ladrao.presoAte = now + ROUBAR_PRISAO_MS;
+        ladrao.presoAte = now + PRISAO_MS;
 
         salvarDados();
 
         await interaction.reply(
-          `🚨 Foi pego tentando roubar ${alvo.username} e pagou uma multa de ${formatarMoedas(multa)}. Ficou **preso por 15 minutos**! 🚔`
+          `🚨 Foi pego tentando roubar ${alvo.username}! Pagou uma multa de ${formatarMoedas(multa)} e ficou ` +
+          `**PRESO por 15 minutos** — nada de trabalhar, pescar ou roubar nesse tempo.`
         );
       }
 
@@ -2374,7 +2536,7 @@ client.on("interactionCreate", async interaction => {
       doador.coins -= quantidade;
       recebedor.coins += quantidade;
 
-      await verificarMetaMoedas(interaction.channel, alvo.id, recebedor);
+      await verificarMarcosMoedas(interaction.guild, alvo.id, recebedor);
       salvarDados();
 
       await interaction.reply(
@@ -2427,7 +2589,7 @@ client.on("interactionCreate", async interaction => {
 
       if (ganhou) {
         data.coins += quantidade;
-        await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+        await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
         salvarDados();
 
         await interaction.reply(
@@ -2479,7 +2641,7 @@ client.on("interactionCreate", async interaction => {
       const premio = Math.floor(quantidade * resultado.multiplicador);
       data.coins += premio;
 
-      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
       salvarDados();
 
       const embed = new EmbedBuilder()
@@ -2554,7 +2716,9 @@ client.on("interactionCreate", async interaction => {
 
       const desbloqueadasAgora = await verificarConquistas(member, data);
 
-      await verificarMetaMoedas(interaction.channel, interaction.user.id, data);
+      if (desbloqueadasAgora.length > 0) {
+        await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
+      }
       salvarDados();
 
       const linhas = Object.entries(CONQUISTAS).map(([id, conquista]) => {
@@ -2664,7 +2828,7 @@ client.on("interactionCreate", async interaction => {
         data.coins = quantidade;
       }
 
-      await verificarMetaMoedas(interaction.channel, alvo.id, data);
+      await verificarMarcosMoedas(interaction.guild, alvo.id, data);
       salvarDados();
 
       await interaction.reply({
@@ -2813,8 +2977,7 @@ async function start() {
       return;
     }
 
-    carregarDados();
-    carregarMetas();
+    await carregarDados();
 
     await registerCommands();
 
@@ -2826,13 +2989,30 @@ async function start() {
   }
 }
 
-// Salva automaticamente a cada 2 minutos
+// Salva no disco a cada 2 minutos
 setInterval(salvarDados, 2 * 60 * 1000);
 
-// Salva quando o processo for encerrado (deploy novo, reinício manual, etc.)
-function encerrarComSalvamento() {
+// Sobe pro GitHub a cada 5 minutos, mas só se algo mudou desde o último envio
+setInterval(() => {
+  if (dadosAlterados) githubSalvar();
+}, GITHUB_SAVE_INTERVAL_MS);
+
+// Quando o Render manda desligar (deploy novo, reinício), salva no disco E no GitHub
+// antes de fechar — é isso que evita perder o progresso dos últimos minutos.
+let encerrando = false;
+async function encerrarComSalvamento() {
+  if (encerrando) return;
+  encerrando = true;
+
   console.log("💾 Salvando banco de dados antes de encerrar...");
   salvarDados();
+
+  // se já tem um envio em andamento, espera ele terminar (até ~10s)
+  for (let i = 0; i < 20 && salvandoGithub; i++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  await githubSalvar();
+
   process.exit(0);
 }
 process.on("SIGINT", encerrarComSalvamento);
