@@ -1229,7 +1229,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("conquistas")
-    .setDescription("Vê e reivindica suas conquistas do servidor."),
+    .setDescription("Vê e reivindica suas conquistas do servido."),
 
   new SlashCommandBuilder()
     .setName("jogos")
