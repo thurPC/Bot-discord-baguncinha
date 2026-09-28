@@ -48,7 +48,7 @@
     "voiceXp": 151,
     "voiceLevel": 1,
     "lastMessageTimestamp": 1790586573617,
-    "coins": 210,
+    "coins": 5210,
     "lastDaily": 1790556243376,
     "lastTrabalhar": 1790586497266,
     "lastPescar": 1790586504329,
@@ -58,7 +58,9 @@
     "turboTrabalhar": false,
     "xpBoostAte": 0,
     "ticketsSorteio": 0,
-    "conquistas": [],
+    "conquistas": [
+      "veterano"
+    ],
     "itemLendario": false,
     "milestonesAlcancados": []
   },
