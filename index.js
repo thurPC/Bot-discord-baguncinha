@@ -1812,6 +1812,110 @@ function urlValida(valor) {
   return typeof valor === "string" && /^https?:\/\//i.test(valor);
 }
 
+// =========================
+// BOTÕES DO EMBED (o que cada botão faz)
+// =========================
+// Tipos: "link" (abre um site), "cargo" (dá/tira um cargo), "msg" (responde uma mensagem só pra quem clicou).
+// Máximo de 5 botões por embed (uma linha). O texto da resposta do tipo "msg" vai dentro do
+// próprio botão (customId), por isso o limite de 70 caracteres — assim funciona pra sempre,
+// mesmo depois de reiniciar o bot.
+const EMBED_BOTOES_MAX = 5;
+const EMBED_BOTAO_MSG_MAX = 70;
+
+// Cargos com essas permissões NUNCA podem virar botão — senão qualquer pessoa
+// clicando ganharia poder de staff.
+const PERMISSOES_PERIGOSAS_BOTAO = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageGuild,
+  PermissionFlagsBits.ManageRoles,
+  PermissionFlagsBits.ManageChannels,
+  PermissionFlagsBits.ManageMessages,
+  PermissionFlagsBits.ManageWebhooks,
+  PermissionFlagsBits.KickMembers,
+  PermissionFlagsBits.BanMembers,
+  PermissionFlagsBits.ModerateMembers,
+  PermissionFlagsBits.MentionEveryone
+];
+
+// Retorna o motivo do erro (texto) ou null se o cargo pode ser usado.
+// memberCriador = quem está montando o embed (null na hora do clique).
+function validarCargoParaBotao(guild, role, memberCriador) {
+  if (!role) return "Não achei esse cargo.";
+  if (role.id === guild.id) return "Não dá pra usar o @everyone.";
+  if (role.managed) return "Esse cargo é de um bot/integração.";
+  if (role.id === NAO_VERIFICADO_ROLE_ID) return "Esse é o cargo da verificação, não pode virar botão.";
+  if (role.permissions.any(PERMISSOES_PERIGOSAS_BOTAO)) {
+    return "Esse cargo tem permissão de staff/administração, então não pode ser dado por botão.";
+  }
+  if (!role.editable) return "Meu cargo precisa estar ACIMA desse cargo na lista de cargos.";
+  if (
+    memberCriador &&
+    guild.ownerId !== memberCriador.id &&
+    memberCriador.roles.highest.comparePositionTo(role) <= 0
+  ) {
+    return "Você só pode usar cargos que estão abaixo do seu cargo mais alto.";
+  }
+  return null;
+}
+
+// Aceita ID, menção (<@&id>) ou nome do cargo
+function acharCargoPorTexto(guild, texto) {
+  const limpo = texto.trim();
+  const idMatch = limpo.match(/^<@&(\d+)>$/) || limpo.match(/^(\d{15,25})$/);
+  if (idMatch) return guild.roles.cache.get(idMatch[1]) || null;
+
+  const minusculo = limpo.toLowerCase();
+  return guild.roles.cache.find(r => r.name.toLowerCase() === minusculo) || null;
+}
+
+function customIdDoBotao(botao) {
+  if (botao.tipo === "cargo") return `embedbtn:cargo:${botao.roleId}`;
+  if (botao.tipo === "msg") return `embedbtn:msg:${botao.texto}`;
+  return null;
+}
+
+function montarBotoesPublicos(botoes) {
+  if (!botoes || botoes.length === 0) return [];
+
+  const linha = new ActionRowBuilder();
+  for (const botao of botoes) {
+    const b = new ButtonBuilder().setLabel(botao.label);
+
+    if (botao.tipo === "link") {
+      b.setStyle(ButtonStyle.Link).setURL(botao.url);
+    } else if (botao.tipo === "cargo") {
+      b.setStyle(ButtonStyle.Success).setCustomId(customIdDoBotao(botao));
+    } else {
+      b.setStyle(ButtonStyle.Primary).setCustomId(customIdDoBotao(botao));
+    }
+
+    linha.addComponents(b);
+  }
+
+  return [linha];
+}
+
+function descreverBotao(botao, indice) {
+  if (botao.tipo === "link") return `${indice + 1}. 🔗 **${botao.label}** → abre ${botao.url}`;
+  if (botao.tipo === "cargo") return `${indice + 1}. 🎭 **${botao.label}** → dá/tira o cargo <@&${botao.roleId}>`;
+  return `${indice + 1}. 💬 **${botao.label}** → responde: "${botao.texto}"`;
+}
+
+// Tudo que o construtor mostra: texto com a lista de botões + prévia + controles
+function payloadEmbedBuilder(draft) {
+  const botoes = draft.botoes || [];
+  const conteudo = botoes.length > 0
+    ? `**Botões do embed (${botoes.length}/${EMBED_BOTOES_MAX}):**\n${botoes.map(descreverBotao).join("\n")}`
+    : null;
+
+  return {
+    content: conteudo,
+    embeds: [montarPreviewEmbed(draft)],
+    components: montarComponentesEmbedBuilder(),
+    allowedMentions: { parse: [] }
+  };
+}
+
 function montarPreviewEmbed(draft) {
   const cor = draft.cor === null ? Math.floor(Math.random() * 0xffffff) : draft.cor;
 
@@ -1858,7 +1962,19 @@ function montarComponentesEmbedBuilder() {
     new ButtonBuilder().setCustomId("embedbuilder_cancelar").setLabel("❌ Cancelar").setStyle(ButtonStyle.Danger)
   );
 
-  return [linhaCanal, linhaCor, linhaBotoes1, linhaBotoes2];
+  const linhaBotaoTipo = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("embedbuilder_botao_tipo")
+      .setPlaceholder("🔘 Adicionar botão ao embed")
+      .addOptions([
+        { label: "🔗 Botão de link", description: "Abre um site quando clicar", value: "link" },
+        { label: "🎭 Botão de cargo", description: "Dá ou tira um cargo de quem clicar", value: "cargo" },
+        { label: "💬 Botão de resposta", description: "Manda uma mensagem só pra quem clicar", value: "msg" },
+        { label: "🗑️ Remover todos os botões", description: "Limpa os botões deste embed", value: "limpar" }
+      ])
+  );
+
+  return [linhaCanal, linhaCor, linhaBotaoTipo, linhaBotoes1, linhaBotoes2];
 }
 
 async function handleEmbedBuilderInteraction(interaction) {
@@ -1911,17 +2027,68 @@ async function handleEmbedBuilderInteraction(interaction) {
     return;
   }
 
+  // Escolha do tipo de botão (abre um formulário pra definir o que ele faz)
+  if (interaction.isStringSelectMenu() && interaction.customId === "embedbuilder_botao_tipo") {
+    const tipo = interaction.values[0];
+
+    if (tipo === "limpar") {
+      draft.botoes = [];
+      await interaction.update(payloadEmbedBuilder(draft));
+      return;
+    }
+
+    if ((draft.botoes || []).length >= EMBED_BOTOES_MAX) {
+      await interaction.reply({
+        content: `❌ Já tem ${EMBED_BOTOES_MAX} botões (o máximo). Remove os botões e adiciona de novo se quiser trocar.`,
+        ephemeral: true
+      });
+      return;
+    }
+
+    const config = {
+      link: { titulo: "Botão de link", label: "URL que o botão abre (https://...)", estilo: TextInputStyle.Short, max: 300 },
+      cargo: { titulo: "Botão de cargo", label: "Cargo (nome, ID ou @menção)", estilo: TextInputStyle.Short, max: 100 },
+      msg: { titulo: "Botão de resposta", label: `Mensagem da resposta (até ${EMBED_BOTAO_MSG_MAX} letras)`, estilo: TextInputStyle.Short, max: EMBED_BOTAO_MSG_MAX }
+    }[tipo];
+
+    const modal = new ModalBuilder()
+      .setCustomId(`embedbuilder_modal_botao_${tipo}`)
+      .setTitle(config.titulo);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("label")
+          .setLabel("Texto que aparece no botão")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(80)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("valor")
+          .setLabel(config.label)
+          .setStyle(config.estilo)
+          .setRequired(true)
+          .setMaxLength(config.max)
+      )
+    );
+
+    await interaction.showModal(modal);
+    return;
+  }
+
   // Seleção de cor
   if (interaction.isStringSelectMenu() && interaction.customId === "embedbuilder_cor") {
     draft.cor = CORES_EMBED[interaction.values[0]].valor;
-    await interaction.update({ embeds: [montarPreviewEmbed(draft)], components: montarComponentesEmbedBuilder() });
+    await interaction.update(payloadEmbedBuilder(draft));
     return;
   }
 
   // Seleção de canal
   if (interaction.isChannelSelectMenu() && interaction.customId === "embedbuilder_canal") {
     draft.canalId = interaction.values[0];
-    await interaction.update({ embeds: [montarPreviewEmbed(draft)], components: montarComponentesEmbedBuilder() });
+    await interaction.update(payloadEmbedBuilder(draft));
     return;
   }
 
@@ -1937,7 +2104,7 @@ async function handleEmbedBuilderInteraction(interaction) {
     }
 
     try {
-      await canal.send({ embeds: [montarPreviewEmbed(draft)] });
+      await canal.send({ embeds: [montarPreviewEmbed(draft)], components: montarBotoesPublicos(draft.botoes) });
       embedDrafts.delete(userId);
       await interaction.update({ content: `✅ Anúncio postado em ${canal}.`, embeds: [], components: [] });
     } catch (error) {
@@ -1957,6 +2124,47 @@ async function handleEmbedBuilderInteraction(interaction) {
     return;
   }
 
+  // Retorno do formulário de botão
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("embedbuilder_modal_botao_")) {
+    const tipo = interaction.customId.replace("embedbuilder_modal_botao_", "");
+    const label = interaction.fields.getTextInputValue("label").trim();
+    const valor = interaction.fields.getTextInputValue("valor").trim();
+
+    const erro = async mensagem => {
+      await interaction.reply({ content: `❌ ${mensagem}`, ephemeral: true });
+    };
+
+    if (!label) return erro("O botão precisa de um texto.");
+    if ((draft.botoes || []).length >= EMBED_BOTOES_MAX) return erro(`Máximo de ${EMBED_BOTOES_MAX} botões.`);
+
+    let botao;
+
+    if (tipo === "link") {
+      if (!urlValida(valor)) return erro("O link precisa começar com http:// ou https://");
+      botao = { tipo: "link", label, url: valor };
+    } else if (tipo === "cargo") {
+      const membroCriador = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      const role = acharCargoPorTexto(interaction.guild, valor);
+      const motivo = validarCargoParaBotao(interaction.guild, role, membroCriador);
+      if (motivo) return erro(motivo);
+      botao = { tipo: "cargo", label, roleId: role.id };
+    } else if (tipo === "msg") {
+      botao = { tipo: "msg", label, texto: valor.slice(0, EMBED_BOTAO_MSG_MAX) };
+    } else {
+      return erro("Tipo de botão desconhecido.");
+    }
+
+    // dois botões iguais gerariam o mesmo ID interno e o Discord recusaria o embed
+    const idNovo = customIdDoBotao(botao);
+    if (idNovo && draft.botoes.some(b => customIdDoBotao(b) === idNovo)) {
+      return erro("Já existe um botão igual a esse.");
+    }
+
+    draft.botoes.push(botao);
+    await interaction.update(payloadEmbedBuilder(draft));
+    return;
+  }
+
   // Retorno dos modais (imagem, rodapé, link)
   if (interaction.isModalSubmit()) {
     const valor = interaction.fields.getTextInputValue("valor").trim();
@@ -1969,7 +2177,46 @@ async function handleEmbedBuilderInteraction(interaction) {
       draft.linkTitulo = urlValida(valor) ? valor : null;
     }
 
-    await interaction.update({ embeds: [montarPreviewEmbed(draft)], components: montarComponentesEmbedBuilder() });
+    await interaction.update(payloadEmbedBuilder(draft));
+    return;
+  }
+}
+
+// Alguém clicou num botão de um embed publicado
+async function handleEmbedBotaoClique(interaction) {
+  const [, tipo, ...resto] = interaction.customId.split(":");
+  const valor = resto.join(":");
+
+  if (tipo === "msg") {
+    await interaction.reply({ content: valor, ephemeral: true, allowedMentions: { parse: [] } });
+    return;
+  }
+
+  if (tipo === "cargo") {
+    const guild = interaction.guild;
+    const role = guild.roles.cache.get(valor);
+
+    // confere de novo na hora do clique: as permissões do cargo podem ter mudado
+    const motivo = validarCargoParaBotao(guild, role, null);
+    if (motivo) {
+      await interaction.reply({ content: `❌ Esse botão não está funcionando: ${motivo}`, ephemeral: true });
+      return;
+    }
+
+    try {
+      const member = await guild.members.fetch(interaction.user.id);
+
+      if (member.roles.cache.has(role.id)) {
+        await member.roles.remove(role.id);
+        await interaction.reply({ content: `➖ Tirei o cargo **${role.name}** de você.`, ephemeral: true });
+      } else {
+        await member.roles.add(role.id);
+        await interaction.reply({ content: `➕ Você ganhou o cargo **${role.name}**!`, ephemeral: true });
+      }
+    } catch (error) {
+      console.error("❌ Erro no botão de cargo:", error);
+      await interaction.reply({ content: "❌ Não consegui mexer nesse cargo agora.", ephemeral: true }).catch(() => {});
+    }
     return;
   }
 }
@@ -1981,6 +2228,12 @@ client.on("interactionCreate", async interaction => {
   // Componentes/modais do construtor de /embed (não são slash commands)
   if (interaction.customId && interaction.customId.startsWith("embedbuilder_")) {
     await handleEmbedBuilderInteraction(interaction);
+    return;
+  }
+
+  // Botões que os admins criaram dentro de um /embed
+  if (interaction.customId && interaction.customId.startsWith("embedbtn:")) {
+    await handleEmbedBotaoClique(interaction);
     return;
   }
 
@@ -2190,7 +2443,7 @@ client.on("interactionCreate", async interaction => {
         .slice(0, 10);
 
       if (ranking.length === 0) {
-        await interaction.reply("Ainda não rolou nada por aqui. Manda umas mensagens ou entra numa call!");
+        await interaction.reply("Ainda não rolou nada por aqui. Manda umas mensagens ou entra em call!");
         return;
       }
 
@@ -2275,14 +2528,14 @@ client.on("interactionCreate", async interaction => {
         footer: null,
         linkTitulo: null,
         canalId: null,
+        botoes: [],
         autorNome: interaction.user.username
       };
 
       embedDrafts.set(interaction.user.id, draft);
 
       await interaction.reply({
-        embeds: [montarPreviewEmbed(draft)],
-        components: montarComponentesEmbedBuilder(),
+        ...payloadEmbedBuilder(draft),
         ephemeral: true
       });
 
@@ -2435,7 +2688,7 @@ client.on("interactionCreate", async interaction => {
       const alvo = interaction.options.getUser("usuario");
 
       if (alvo.id === interaction.user.id) {
-        await interaction.reply({ content: "❌ Não dá pra roubar de si mesmo, mn.", ephemeral: true });
+        await interaction.reply({ content: "❌ Não dá pra roubar de si mesmo, mn. (???)", ephemeral: true });
         return;
       }
       if (alvo.bot) {
@@ -2476,7 +2729,7 @@ client.on("interactionCreate", async interaction => {
       const sucesso = Math.random() < 0.4; // 40% de chance de dar certo
 
       if (sucesso) {
-        const percentual = Math.random() * 0.2 + 0.1; // rouba 10% a 30%
+        const percentual = Math.random() * 0.30 + 0.20; // 0.30 (diferença) + 0.20 (mínimo)
         const roubado = Math.max(1, Math.floor(vitima.coins * percentual));
 
         vitima.coins -= roubado;
@@ -2486,7 +2739,7 @@ client.on("interactionCreate", async interaction => {
         salvarDados();
 
         await interaction.reply(
-          `🕵️ Deu certo! Você roubou ${formatarMoedas(roubado)} de ${alvo.username}.`
+          `🕵️ **Deu certo! Você roubou** ${formatarMoedas(roubado)} de ${alvo.username}.`
         );
       } else {
         const multa = Math.floor(Math.random() * 221) + 80; // perde 80 a 300
@@ -2540,7 +2793,7 @@ client.on("interactionCreate", async interaction => {
       salvarDados();
 
       await interaction.reply(
-        `🤝 Você doou ${formatarMoedas(quantidade)} pra **${alvo.username}**. Bonito gesto.`
+        `🤝 Você doou ${formatarMoedas(quantidade)} pra **${alvo.username}**. Bonito gesto mn.`
       );
       console.log("✅ /doar respondido");
       return;
@@ -2645,7 +2898,7 @@ client.on("interactionCreate", async interaction => {
       salvarDados();
 
       const embed = new EmbedBuilder()
-        .setTitle("🎰 ROLETA BAGUNCINHA")
+        .setTitle("🎰 ROLETA BAGUNCINHA 🎰")
         .setDescription(
           `Você apostou ${formatarMoedas(quantidade)}.\n\n` +
           `${resultado.label}\n\n` +
@@ -2699,7 +2952,7 @@ client.on("interactionCreate", async interaction => {
       );
 
       await interaction.reply({
-        content: `🪨📄✂️ ${interaction.user} desafiou ${alvo} para Pedra, Papel ou Tesoura apostando ${formatarMoedas(quantidade)}!\n${alvo}, aceita?`,
+        content: ` ${interaction.user} desafiou ${alvo} para Pedra, Papel ou Tesoura apostando ${formatarMoedas(quantidade)}!\n${alvo}, aceita?`,
         components: [linhaBotoes]
       });
 
