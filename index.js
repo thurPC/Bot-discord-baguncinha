@@ -1234,8 +1234,8 @@ const commands = [
   new SlashCommandBuilder()
     .setName("jogos")
     .setDescription("Mostra os próximos jogos do Brasileirão e da Seleção."),
-
-  new ()
+  
+  new SlashCommandBuilder()
     .setName("editarmoedas")
     .setDescription("Adiciona, remove ou define as moedas de um usuário (admin).")
     .addUserOption(option =>
