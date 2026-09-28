@@ -532,23 +532,23 @@ const LOJA_ITEMS = {
   },
   cargo_vip: {
     categoria: "cargos",
-    nome: "👑 Cargo VIP",
-    preco: 3500,
-    descricao: "Cargo cosmético de destaque no servidor.",
+    nome: " ",
+    preco: 5500,
+    descricao: "Cargo destaque no servidor.",
     tipo: "cargo",
-    roleId: "1371849692974944357"
+    roleId: " "
   },
   cargo_pirata: {
     categoria: "cargos",
     nome: "🏴‍☠️ Cargo Pirata",
     preco: 4500,
-    descricao: "Pra quem tá on pela zoeira.",
+    descricao: "desbloquea novos canais pir2tas.",
     tipo: "cargo",
     roleId: "1530739542733230251"
   },
   cargo_neon: {
     categoria: "cargos",
-    nome: "🌈 Cargo Neon",
+    nome: "Cargo Neon",
     preco: 6000,
     descricao: "Cor de nome mais legal do servidor.",
     tipo: "cargo",
@@ -558,7 +558,7 @@ const LOJA_ITEMS = {
     categoria: "caixas",
     nome: "📦 Caixa baguncinha",
     preco: 2000,
-    descricao: "Pode vir moedas, XP Boost, cargo temporário ou até item lendário.",
+    descricao: "Pode vir moedas, XP Boost, cargo temporário ou até item lendário, depende da sua sorte.",
     tipo: "caixa"
   },
   ticket_sorteio: {
