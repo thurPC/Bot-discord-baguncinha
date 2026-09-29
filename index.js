@@ -549,11 +549,11 @@ const LOJA_ITEMS = {
   },
   cargo_vip: {
     categoria: "cargos",
-    nome: "💎 Cargo VIP",
-    preco: 5500,
-    descricao: "Cargo destaque no servidor.",
+    nome: "Cargo (??)",
+    preco: 12500,
+    descricao: "???",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_VIP"
+    roleId: ""
   },
   cargo_pirata: {
     categoria: "cargos",
@@ -565,9 +565,9 @@ const LOJA_ITEMS = {
   },
   cargo_neon: {
     categoria: "cargos",
-    nome: "Cargo ",
-    preco: 6000,
-    descricao: ".",
+    nome: "Cargo (??)",
+    preco: 12000,
+    descricao: "???",
     tipo: "cargo",
     roleId: ""
   },
@@ -576,7 +576,7 @@ const LOJA_ITEMS = {
   cargo_celestial: {
     categoria: "cargos",
     nome: "Cargo celestial",
-    preco: 3000,
+    preco: 5000,
     descricao: "Mídia.",
     tipo: "cargo",
     roleId: "1554311367199031396"
@@ -624,7 +624,7 @@ const LOJA_ITEMS = {
   cargo_171: {
     categoria: "cargos",
     nome: "Cargo 171",
-    preco: 3000,
+    preco: 4000,
     descricao: "Estelionatario bigode?",
     tipo: "cargo",
     roleId: "1554315568125845525"
@@ -632,7 +632,7 @@ const LOJA_ITEMS = {
   cargo_777: {
     categoria: "cargos",
     nome: "Cargo 777",
-    preco: 3000,
+    preco: 7770,
     descricao: "🎰",
     tipo: "cargo",
     roleId: "1554315611281166366"
@@ -640,15 +640,15 @@ const LOJA_ITEMS = {
   cargo_coroa: {
     categoria: "cargos",
     nome: "Cargo Coroa",
-    preco: 7000,
+    preco: 3500,
     descricao: "duo Cara?.",
     tipo: "cargo",
     roleId: "1554318085027143821"
   },
   cargo_cara: {
     categoria: "cargos",
-    nome: "Cargo Cara ",
-    preco: 4500,
+    nome: "Cargo Cara",
+    preco: 3500,
     descricao: "duo coroa?.",
     tipo: "cargo",
     roleId: "1554317867422322728"
@@ -664,13 +664,13 @@ const LOJA_ITEMS = {
 
   caixa_baguncinha: {
     categoria: "caixas",
-    nome: "📦 Caixa baguncinha",
+    nome: "📦 Caixa Baguncinha",
     preco: 2000,
     descricao: "Pode vir moedas, XP Boost, cargo temporário ou até item lendário, depende da sua sorte.",
     tipo: "caixa"
   },
   ticket_sorteio: {
-    categoria: "bilhetes",
+    categoria: "Bilhetes",
     nome: "🎫 Ticket de Sorteio",
     preco: 700,
     descricao: "1 bilhete = 1 chance no próximo sorteio (staff usa `/sortear`).",
@@ -690,7 +690,7 @@ const CAIXA_REWARDS = [
   { raridade: "RARO", peso: 15, tipo: "moedas", valor: 3000 },
   { raridade: "RARO", peso: 10, tipo: "xp_boost", valor: null },
   { raridade: "ÉPICO", peso: 6, tipo: "cargo_temporario", valor: null },
-  { raridade: "LENDÁRIO", peso: 3, tipo: "moedas", valor: 8000 },
+  { raridade: "**LENDÁRIO**", peso: 3, tipo: "moedas", valor: 8000 },
   { raridade: "???", peso: 1, tipo: "jackpot", valor: 20000 }
 ];
 
@@ -778,7 +778,7 @@ function sortearRoleta() {
 // assim a pessoa volta a interagir com o bot em vez de só ganhar tudo passivo.
 const CONQUISTAS = {
   veterano: {
-    nome: "🏆 Veterano",
+    nome: "🏆 **Veterano**",
     descricao: "Fique 30 dias no servidor.",
     condicao: member => Date.now() - member.joinedTimestamp >= 30 * 24 * 60 * 60 * 1000,
     moedas: 5000,
@@ -812,14 +812,14 @@ async function verificarConquistas(member, data) {
 // =========================
 function montarEmbedLojaPrincipal() {
   return new EmbedBuilder()
-    .setTitle("🎪 BAGUNCINHA STORE")
+    .setTitle("🎪 **BAGUNCINHA STORE**")
     .setDescription(
       "Escolha uma categoria no menu abaixo pra ver os itens.\n\n" +
       Object.values(LOJA_CATEGORIAS).map(c => `${c.nome} — ${c.descricao}`).join("\n") +
       "\n\n🏆 Tem conquistas te esperando também — dá uma olhada no `/conquistas`."
     )
     .setColor(0x9b59b6)
-    .setFooter({ text: "Baguncinha Store" });
+    .setFooter({ text: "**Baguncinha Store**" });
 }
 
 function montarComponentesLojaPrincipal() {
@@ -887,7 +887,7 @@ function montarEmbedItem(itemId) {
     .setTitle(item.nome)
     .setDescription(`${item.descricao}\n\n**Preço:** ${formatarMoedas(item.preco)}`)
     .setColor(0x9b59b6)
-    .setFooter({ text: "Baguncinha Store" });
+    .setFooter({ text: "**Baguncinha Store**" });
 
   if (lojaImagens[itemId]) embed.setImage(lojaImagens[itemId]);
   return embed;
@@ -899,7 +899,7 @@ function montarComponentesItem(itemId) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`loja_comprar_${itemId}`)
-        .setLabel(`🛒 Comprar — ${item.preco}🪙`)
+        .setLabel(`**COMPRAR** — ${item.preco}🪙`)
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`loja_cat_${item.categoria}`)
@@ -982,7 +982,7 @@ async function comprarItem(interaction, itemId) {
       interaction,
       item,
       itemId,
-      "✅ Comprado! Seu cooldown do `/trabalhar` agora é de **25 minutos**."
+      "✅ Comprado! Seu tempo do `/trabalhar` agora é de **25 minutos**."
     );
     return;
   }
@@ -2498,7 +2498,7 @@ client.on("interactionCreate", async interaction => {
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
         "🎰 `/roleta` — Aposta moedas na Roleta.\n" +
         "🪨 `/ppt` — Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.\n" +
-        "🏆 `/conquistas` — Vê e reivindica suas conquistas do servidor.\n"
+        "🏆 `/conquistas` — Vê e resgata suas conquistas do servidor.\n"
       );
       console.log("✅ /help respondido");
       return;
@@ -2668,7 +2668,7 @@ client.on("interactionCreate", async interaction => {
       });
 
       const embed = new EmbedBuilder()
-        .setTitle("🏆 Ranking dessa porra")
+        .setTitle("🏆 **Ranking**")
         .setDescription(linhas.join("\n\n"))
         .setColor(0xfee75c)
         .setThumbnail(usuarios[0]?.displayAvatarURL({ size: 256 }) || null)
@@ -3120,7 +3120,7 @@ client.on("interactionCreate", async interaction => {
 
       if (now - data.lastRoleta < ROLETA_COOLDOWN_MS) {
         const restante = ROLETA_COOLDOWN_MS - (now - data.lastRoleta);
-        const segundos = Math.ceil(restante / 1000);
+        const segundos = Math.ceil(restante / 100);
         await interaction.reply({
           content: `⏳ A roleta ainda tá girando. Espera ~${segundos}s.`,
           ephemeral: true
