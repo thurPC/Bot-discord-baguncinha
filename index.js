@@ -30,6 +30,13 @@ const GUILD_ID = "1370256381701128192";
 const PORT = process.env.PORT || 10000;
 const FOOTBALL_API_KEY = process.env.API_FOOTBALL_KEY;
 
+// ID do Discord de quem pode mudar as imagens da loja (só você).
+// Configure a variável OWNER_ID no Render.
+const OWNER_ID = process.env.OWNER_ID;
+
+// itemId -> URL da imagem mostrada na prévia/compra (só o dono altera via /lojaimagem)
+let lojaImagens = {};
+
 // =========================
 // VERIFICAÇÃO
 // =========================
@@ -96,6 +103,11 @@ let githubSha = null;        // "versão" atual do arquivo no GitHub (necessári
 let dadosAlterados = false;  // true = tem coisa nova que ainda não foi pro GitHub
 let salvandoGithub = false;  // evita dois salvamentos ao mesmo tempo
 let ultimoTextoEnviado = null; // conteúdo do último envio (pra não commitar sem mudança)
+
+// Tudo que vai pro disco/GitHub: dados dos usuários + imagens da loja
+function dadosParaSalvar() {
+  return { ...Object.fromEntries(xpData), __lojaImagens: lojaImagens };
+}
 
 async function githubRequest(metodo, caminho, corpo) {
   const controller = new AbortController();
@@ -179,7 +191,7 @@ async function githubSalvar() {
   dadosAlterados = false; // se alguém mexer durante o envio, vira true de novo
 
   try {
-    const texto = JSON.stringify(Object.fromEntries(xpData), null, 2);
+    const texto = JSON.stringify(dadosParaSalvar(), null, 2);
 
     // nada mudou desde o último envio? então não gasta um commit à toa
     if (texto === ultimoTextoEnviado) {
@@ -235,8 +247,13 @@ async function githubSalvar() {
 }
 
 function aplicarDadosCarregados(objeto) {
-  for (const [userId, dadosUsuario] of Object.entries(objeto)) {
-    xpData.set(userId, dadosUsuario);
+  for (const [chave, valor] of Object.entries(objeto)) {
+    // chave especial: imagens da loja (não é um usuário)
+    if (chave === "__lojaImagens") {
+      lojaImagens = valor || {};
+      continue;
+    }
+    xpData.set(chave, valor);
   }
 }
 
@@ -274,8 +291,7 @@ async function carregarDados() {
 // Salva no disco na hora e marca pra subir pro GitHub no próximo ciclo
 function salvarDados() {
   try {
-    const objeto = Object.fromEntries(xpData);
-    fs.writeFileSync(DATA_FILE, JSON.stringify(objeto, null, 2));
+    fs.writeFileSync(DATA_FILE, JSON.stringify(dadosParaSalvar(), null, 2));
     dadosAlterados = true;
   } catch (error) {
     console.error("❌ Erro ao salvar banco de dados:", error);
@@ -508,9 +524,10 @@ async function verificarMarcosMoedas(guild, userId, data) {
 //   "xp_boost"         -> dobra XP por 1h
 //   "caixa"            -> abre uma caixa misteriosa com prêmio aleatório
 //   "ticket"           -> dá 1 bilhete pro sorteio
+// Enquanto o roleId começar com "COLOQUE_", a compra é cancelada sem cobrar.
 const LOJA_CATEGORIAS = {
   boosts: { nome: "⚡ Boosts", descricao: "Vantagens permanentes ou temporárias." },
-  cargos: { nome: "👑 Cargos", descricao: "Cargos cosméticos pra se destacar." },
+  cargos: { nome: "👑 Cargos", descricao: "Cargos personalizados e especiais." },
   caixas: { nome: "📦 Caixas Misteriosas", descricao: "Aposta na sorte por uma recompensa aleatória." },
   bilhetes: { nome: "🎫 Sorteio", descricao: "Bilhetes pra concorrer a prêmios do servidor." }
 };
@@ -519,7 +536,7 @@ const LOJA_ITEMS = {
   turbo_trabalhar: {
     categoria: "boosts",
     nome: "⏱️ Turbo Trabalhar",
-    preco: 3000,
+    preco: 5000,
     descricao: "Reduz o tempo do `/trabalhar` de 60 pra 25 minutos. Permanente.",
     tipo: "turbo_trabalhar"
   },
@@ -532,28 +549,119 @@ const LOJA_ITEMS = {
   },
   cargo_vip: {
     categoria: "cargos",
-    nome: " ",
+    nome: "💎 Cargo VIP",
     preco: 5500,
     descricao: "Cargo destaque no servidor.",
     tipo: "cargo",
-    roleId: " "
+    roleId: "COLOQUE_ID_VIP"
   },
   cargo_pirata: {
     categoria: "cargos",
     nome: "🏴‍☠️ Cargo Pirata",
     preco: 4500,
-    descricao: "desbloquea novos canais pir2tas.",
+    descricao: "desbloquea novos canais pir2tas no servidor.",
     tipo: "cargo",
     roleId: "1530739542733230251"
   },
   cargo_neon: {
     categoria: "cargos",
-    nome: "Cargo Neon",
+    nome: "Cargo monge",
     preco: 6000,
-    descricao: "Cor de nome mais legal do servidor.",
+    descricao: "Cor de nome diferenciado.",
     tipo: "cargo",
-    roleId: "COLOQUE_O_ID_DO_CARGO_NEON_AQUI"
+    roleId: "1554310974020784189"
   },
+
+  // ---- 11 cargos novos (troque os COLOQUE_ID_x pelos IDs reais; nomes/preços são sugestões) ----
+  cargo_lenda: {
+    categoria: "cargos",
+    nome: "🌟 Cargo Estrela",
+    preco: 3000,
+    descricao: "Cargo brilhante pro seu perfil.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_1"
+  },
+  cargo_fogo: {
+    categoria: "cargos",
+    nome: "🔥 Cargo Fogo",
+    preco: 3500,
+    descricao: "Cor de nome quente.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_2"
+  },
+  cargo_gelo: {
+    categoria: "cargos",
+    nome: "❄️ Cargo Gelo",
+    preco: 3500,
+    descricao: "Cor de nome gelada.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_3"
+  },
+  cargo_natureza: {
+    categoria: "cargos",
+    nome: "🌿 Cargo Natureza",
+    preco: 3500,
+    descricao: "Cor de nome verde.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_4"
+  },
+  cargo_realeza: {
+    categoria: "cargos",
+    nome: "👑 Cargo Realeza",
+    preco: 8000,
+    descricao: "Pra quem manda no rolê.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_5"
+  },
+  cargo_ninja: {
+    categoria: "cargos",
+    nome: "🥷 Cargo Ninja",
+    preco: 4000,
+    descricao: "Discreto e mortal.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_6"
+  },
+  cargo_gamer: {
+    categoria: "cargos",
+    nome: "🎮 Cargo Gamer",
+    preco: 3000,
+    descricao: "Pra quem vive online.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_7"
+  },
+  cargo_musico: {
+    categoria: "cargos",
+    nome: "🎧 Cargo Músico",
+    preco: 3000,
+    descricao: "Pra quem vive de fone.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_8"
+  },
+  cargo_dragao: {
+    categoria: "cargos",
+    nome: "🐉 Cargo Dragão",
+    preco: 7000,
+    descricao: "Cargo raro e imponente.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_9"
+  },
+  cargo_alien: {
+    categoria: "cargos",
+    nome: "👽 Cargo Alien",
+    preco: 4500,
+    descricao: "Não é deste mundo.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_10"
+  },
+  cargo_milionario: {
+    categoria: "cargos",
+    nome: "💸 Cargo Milionário",
+    preco: 10000,
+    descricao: "Pra exibir sua grana.",
+    tipo: "cargo",
+    roleId: "COLOQUE_ID_11"
+  },
+
   caixa_baguncinha: {
     categoria: "caixas",
     nome: "📦 Caixa baguncinha",
@@ -564,7 +672,7 @@ const LOJA_ITEMS = {
   ticket_sorteio: {
     categoria: "bilhetes",
     nome: "🎫 Ticket de Sorteio",
-    preco: 500,
+    preco: 700,
     descricao: "1 bilhete = 1 chance no próximo sorteio (staff usa `/sortear`).",
     tipo: "ticket"
   }
@@ -700,7 +808,7 @@ async function verificarConquistas(member, data) {
 }
 
 // =========================
-// UI DA LOJA (EMBED + BOTÕES)
+// UI DA LOJA (EMBED + MENUS + BOTÕES)
 // =========================
 function montarEmbedLojaPrincipal() {
   return new EmbedBuilder()
@@ -740,38 +848,76 @@ function montarEmbedLojaCategoria(categoriaId) {
     .setDescription(
       itensCategoria
         .map(([, item]) => `**${item.nome}** — ${formatarMoedas(item.preco)}\n${item.descricao}`)
-        .join("\n\n")
+        .join("\n\n") +
+      "\n\n👇 Escolha um item no menu pra ver a prévia antes de comprar."
     )
     .setColor(0x9b59b6)
     .setFooter({ text: "Baguncinha Store" });
 }
 
+// Menu de itens (até 25 opções) em vez de um botão por item —
+// com tantos cargos, os botões estourariam o limite de 5 linhas do Discord.
 function montarComponentesLojaCategoria(categoriaId) {
   const itensCategoria = Object.entries(LOJA_ITEMS).filter(([, item]) => item.categoria === categoriaId);
 
-  const linhasItens = [];
-  let linhaAtual = new ActionRowBuilder();
-
-  itensCategoria.forEach(([id, item], index) => {
-    if (index > 0 && index % 4 === 0) {
-      linhasItens.push(linhaAtual);
-      linhaAtual = new ActionRowBuilder();
-    }
-    linhaAtual.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`loja_comprar_${id}`)
-        .setLabel(`${item.nome} — ${item.preco}🪙`)
-        .setStyle(ButtonStyle.Primary)
-    );
-  });
-
-  if (linhaAtual.components.length > 0) linhasItens.push(linhaAtual);
+  const linhaItem = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("loja_item")
+      .setPlaceholder("🔎 Escolher item (ver prévia)")
+      .addOptions(
+        itensCategoria.slice(0, 25).map(([id, item]) => ({
+          label: item.nome.slice(0, 100),
+          description: `${item.preco} moedas`,
+          value: id
+        }))
+      )
+  );
 
   const linhaVoltar = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("loja_voltar").setLabel("⬅️ Categorias").setStyle(ButtonStyle.Secondary)
   );
 
-  return [...linhasItens, linhaVoltar];
+  return [linhaItem, linhaVoltar];
+}
+
+// Prévia do item (com a imagem que só o dono define via /lojaimagem)
+function montarEmbedItem(itemId) {
+  const item = LOJA_ITEMS[itemId];
+  const embed = new EmbedBuilder()
+    .setTitle(item.nome)
+    .setDescription(`${item.descricao}\n\n**Preço:** ${formatarMoedas(item.preco)}`)
+    .setColor(0x9b59b6)
+    .setFooter({ text: "Baguncinha Store" });
+
+  if (lojaImagens[itemId]) embed.setImage(lojaImagens[itemId]);
+  return embed;
+}
+
+function montarComponentesItem(itemId) {
+  const item = LOJA_ITEMS[itemId];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`loja_comprar_${itemId}`)
+        .setLabel(`🛒 Comprar — ${item.preco}🪙`)
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`loja_cat_${item.categoria}`)
+        .setLabel("⬅️ Voltar")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+// Confirmação de compra com a imagem do item
+function responderCompra(interaction, item, itemId, texto) {
+  const embed = new EmbedBuilder()
+    .setTitle(item.nome)
+    .setDescription(texto)
+    .setColor(0x2ecc71);
+
+  if (lojaImagens[itemId]) embed.setImage(lojaImagens[itemId]);
+  return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
 async function comprarItem(interaction, itemId) {
@@ -809,6 +955,8 @@ async function comprarItem(interaction, itemId) {
       .setDescription(descricaoPremio)
       .setColor(CORES_RARIDADE[recompensa.raridade] || 0x9b59b6);
 
+    if (lojaImagens[itemId]) embed.setImage(lojaImagens[itemId]);
+
     await verificarMarcosMoedas(interaction.guild, interaction.user.id, data);
     salvarDados();
     await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -818,20 +966,24 @@ async function comprarItem(interaction, itemId) {
   if (item.tipo === "ticket") {
     data.ticketsSorteio += 1;
     salvarDados();
-    await interaction.reply({
-      content: `🎫 Você comprou 1 ticket de sorteio! Total: **${data.ticketsSorteio}**.`,
-      ephemeral: true
-    });
+    await responderCompra(
+      interaction,
+      item,
+      itemId,
+      `🎫 Você comprou 1 ticket de sorteio! Total: **${data.ticketsSorteio}**.`
+    );
     return;
   }
 
   if (item.tipo === "turbo_trabalhar") {
     data.turboTrabalhar = true;
     salvarDados();
-    await interaction.reply({
-      content: "✅ Comprado! Seu cooldown do `/trabalhar` agora é de **25 minutos**.",
-      ephemeral: true
-    });
+    await responderCompra(
+      interaction,
+      item,
+      itemId,
+      "✅ Comprado! Seu cooldown do `/trabalhar` agora é de **25 minutos**."
+    );
     return;
   }
 
@@ -839,13 +991,14 @@ async function comprarItem(interaction, itemId) {
     const agora = Date.now();
     data.xpBoostAte = Math.max(data.xpBoostAte, agora) + 60 * 60 * 1000;
     salvarDados();
-    await interaction.reply({ content: "✅ **XP Boost 2x** ativado por 1 hora!", ephemeral: true });
+    await responderCompra(interaction, item, itemId, "✅ **XP Boost 2x** ativado por 1 hora!");
     return;
   }
 
   if (item.tipo === "cargo") {
     if (item.roleId.startsWith("COLOQUE_")) {
       data.coins += item.preco;
+      salvarDados();
       await interaction.reply({
         content: "❌ Esse cargo ainda não foi configurado pelo admin. Nada foi cobrado.",
         ephemeral: true
@@ -861,12 +1014,13 @@ async function comprarItem(interaction, itemId) {
     }
 
     salvarDados();
-    await interaction.reply({ content: `✅ Você comprou **${item.nome}**! Aproveita.`, ephemeral: true });
+    await responderCompra(interaction, item, itemId, `✅ Você comprou **${item.nome}**! Aproveita.`);
     return;
   }
 }
 
 async function handleLojaInteraction(interaction) {
+  // Escolheu uma categoria
   if (interaction.isStringSelectMenu() && interaction.customId === "loja_categoria") {
     const categoriaId = interaction.values[0];
     await interaction.update({
@@ -876,6 +1030,31 @@ async function handleLojaInteraction(interaction) {
     return;
   }
 
+  // Escolheu um item -> mostra a prévia com imagem + botão de comprar
+  if (interaction.isStringSelectMenu() && interaction.customId === "loja_item") {
+    const itemId = interaction.values[0];
+    if (!LOJA_ITEMS[itemId]) return;
+
+    await interaction.update({
+      embeds: [montarEmbedItem(itemId)],
+      components: montarComponentesItem(itemId)
+    });
+    return;
+  }
+
+  // Voltar da prévia do item pra lista da categoria
+  if (interaction.isButton() && interaction.customId.startsWith("loja_cat_")) {
+    const categoriaId = interaction.customId.replace("loja_cat_", "");
+    if (!LOJA_CATEGORIAS[categoriaId]) return;
+
+    await interaction.update({
+      embeds: [montarEmbedLojaCategoria(categoriaId)],
+      components: montarComponentesLojaCategoria(categoriaId)
+    });
+    return;
+  }
+
+  // Voltar pras categorias
   if (interaction.isButton() && interaction.customId === "loja_voltar") {
     await interaction.update({
       embeds: [montarEmbedLojaPrincipal()],
@@ -884,6 +1063,7 @@ async function handleLojaInteraction(interaction) {
     return;
   }
 
+  // Comprar
   if (interaction.isButton() && interaction.customId.startsWith("loja_comprar_")) {
     const itemId = interaction.customId.replace("loja_comprar_", "");
     await comprarItem(interaction, itemId);
@@ -1180,6 +1360,29 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("lojaimagem")
+    .setDescription("Define ou remove a imagem de um item da loja (só o dono).")
+    .addStringOption(option =>
+      option
+        .setName("item")
+        .setDescription("Item da loja")
+        .setRequired(true)
+        .addChoices(
+          ...Object.entries(LOJA_ITEMS).map(([id, item]) => ({
+            name: item.nome.slice(0, 100),
+            value: id
+          }))
+        )
+    )
+    .addStringOption(option =>
+      option
+        .setName("url")
+        .setDescription("URL da imagem (deixe vazio pra remover)")
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
     .setName("apostar")
     .setDescription("Aposta suas moedas em cara ou coroa.")
     .addIntegerOption(option =>
@@ -1234,7 +1437,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName("jogos")
     .setDescription("Mostra os próximos jogos do Brasileirão e da Seleção."),
-  
+
   new SlashCommandBuilder()
     .setName("editarmoedas")
     .setDescription("Adiciona, remove ou define as moedas de um usuário (admin).")
@@ -2290,7 +2493,7 @@ client.on("interactionCreate", async interaction => {
         "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
         "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal e ir PRESO).\n" +
         "🤝 `/doar` — Doa moedas pra outra pessoa.\n" +
-        "🎪 `/loja` — Abre a Baguncinha Store em embed com botões.\n" +
+        "🎪 `/loja` — Abre a Baguncinha Store com prévia dos itens.\n" +
         "🛍️ `/comprar` — Compra um item da loja direto por comando.\n" +
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
         "🎰 `/roleta` — Aposta moedas na Roleta.\n" +
@@ -2800,7 +3003,7 @@ client.on("interactionCreate", async interaction => {
     }
 
     // =========================
-    // LOJA (embed + botões)
+    // LOJA (embed + menus + botões)
     // =========================
     if (interaction.commandName === "loja") {
       await interaction.reply({
@@ -2818,6 +3021,52 @@ client.on("interactionCreate", async interaction => {
       const itemId = interaction.options.getString("item");
       await comprarItem(interaction, itemId);
       console.log("✅ /comprar respondido");
+      return;
+    }
+
+    // =========================
+    // LOJA IMAGEM (SÓ O DONO)
+    // =========================
+    if (interaction.commandName === "lojaimagem") {
+      if (!OWNER_ID || interaction.user.id !== OWNER_ID) {
+        await interaction.reply({ content: "❌ Só o dono do bot pode mexer nas imagens da loja.", ephemeral: true });
+        return;
+      }
+
+      const itemId = interaction.options.getString("item");
+      const url = (interaction.options.getString("url") || "").trim();
+
+      if (!LOJA_ITEMS[itemId]) {
+        await interaction.reply({ content: "❌ Esse item não existe.", ephemeral: true });
+        return;
+      }
+
+      // sem URL = remove a imagem
+      if (!url) {
+        delete lojaImagens[itemId];
+        salvarDados();
+        await interaction.reply({
+          content: `🗑️ Imagem de **${LOJA_ITEMS[itemId].nome}** removida.`,
+          ephemeral: true
+        });
+        console.log("✅ /lojaimagem (removida)");
+        return;
+      }
+
+      if (!urlValida(url)) {
+        await interaction.reply({ content: "❌ A URL precisa começar com http:// ou https://", ephemeral: true });
+        return;
+      }
+
+      lojaImagens[itemId] = url;
+      salvarDados();
+
+      await interaction.reply({
+        content: `✅ Imagem de **${LOJA_ITEMS[itemId].nome}** atualizada. Prévia abaixo:`,
+        embeds: [montarEmbedItem(itemId)],
+        ephemeral: true
+      });
+      console.log("✅ /lojaimagem respondido");
       return;
     }
 
