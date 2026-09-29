@@ -28,7 +28,7 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = "1370256381701128192";
 const PORT = process.env.PORT || 10000;
-const FOOTBALL_API_KEY = process.env.API_FOOTBALL_KEY;
+const THESPORTSDB_KEY = process.env.THESPORTSDB_KEY || "3";
 
 // ID do Discord de quem pode mudar as imagens da loja (só você).
 // Configure a variável OWNER_ID no Render.
@@ -1428,7 +1428,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("jogos")
-    .setDescription("Mostra os próximos jogos do Brasileirão e da Seleção."),
+    .setDescription("Mostra os próximos jogos do Brasileirão, Libertadores e da Seleção."),
 
   new SlashCommandBuilder()
     .setName("editarmoedas")
@@ -1505,60 +1505,68 @@ async function registerCommands() {
 // =========================
 // AVISOS DE FUTEBOL (BRASILEIRÃO + SELEÇÃO)
 // =========================
-// Usa a API-Football (v3.football.api-sports.io). Plano grátis: 100 requisições/dia.
-// Precisa criar conta em https://dashboard.api-football.com e colocar a chave
-// na variável de ambiente API_FOOTBALL_KEY no Render.
-const FOOTBALL_API_BASE = "https://v3.football.api-sports.io";
+// Fonte: TheSportsDB (gratuita, sem cadastro). Docs: https://www.thesportsdb.com/api.php
+// A chave de teste "3" já funciona. Quem tiver Patreon pode colocar THESPORTSDB_KEY no Render.
+//
+// APIs avaliadas:
+//   TheSportsDB          — grátis, sem chave, cobre Brasil. USADA.
+//   football-data.org    — grátis com cadastro, mas Série A/Copa do Brasil pedem plano pago.
+//   API-Football         — 100 req/dia com chave; o bot antigo dependia só disso e parava sem a chave.
+//   ESPN site.api        — sem chave, mas bloqueia este ambiente (403).
+const SPORTSDB_API_BASE = `https://www.thesportsdb.com/api/v1/json/${THESPORTSDB_KEY}`;
 
-// IDs "de fallback" (mais usados publicamente). O bot tenta confirmar/corrigir
-// esses IDs sozinho ao iniciar, então não precisa mexer aqui normalmente.
-// Cobre: Série A, Série B, Copa do Brasil, Libertadores e Sul-Americana + Seleção.
-const LIGAS_BRASIL = {
-  serieA: { id: 71, nome: "Serie A", country: "Brazil" },
-  serieB: { id: 72, nome: "Serie B", country: "Brazil" },
-  copaDoBrasil: { id: 73, nome: "Copa do Brasil", country: "Brazil" },
-  libertadores: { id: 13, nome: "Libertadores", country: null },
-  sulAmericana: { id: 11, nome: "Sudamericana", country: null }
-};
-let SELECAO_TEAM_ID = 6; // Seleção Brasileira
+const LIGAS_FUTEBOL = [
+  { id: "4351", nome: "Brasileirão Série A" },
+  { id: "4404", nome: "Brasileirão Série B" },
+  { id: "4725", nome: "Copa do Brasil" },
+  { id: "4501", nome: "Copa Libertadores" }
+];
+const SELECAO_TEAM_ID = "134496";
 
 let futebolChannelId = null;
-// Com 5 competições + Seleção (6 chamadas por checagem), a cada 2h dá 72 chamadas/dia,
-// dentro do limite grátis de 100/dia da API-Football.
-const FOOTBALL_CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000;
-const FOOTBALL_REMINDER_WINDOW_MIN = 150; // cobre com folga o intervalo de checagem
-const avisosEnviados = new Set();   // fixture.id que já recebeu o aviso de "tá quase começando"
-const resultadosEnviados = new Set(); // fixture.id que já recebeu o resultado final
+const FOOTBALL_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+const FOOTBALL_REMINDER_WINDOW_MIN = 90;
+const FOOTBALL_RESULTADO_MAX_MS = 18 * 60 * 60 * 1000;
+const avisosEnviados = new Set();
+const resultadosEnviados = new Set();
 
-// Cache curto pro /jogos, pra não gastar a cota da API se várias pessoas usarem seguido
 let jogosCache = { timestamp: 0, dados: null };
 const JOGOS_CACHE_MS = 10 * 60 * 1000;
+let eventosFutebolCache = { timestamp: 0, dados: [] };
+const EVENTOS_CACHE_MS = 8 * 60 * 1000;
 
-async function footballApiFetch(endpoint, params) {
-  const url = new URL(`${FOOTBALL_API_BASE}${endpoint}`);
+function esperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function sportsDbFetch(endpoint, params) {
+  const url = new URL(`${SPORTSDB_API_BASE}${endpoint}`);
   Object.entries(params || {}).forEach(([key, value]) => {
-    url.searchParams.set(key, value);
+    if (value !== undefined && value !== null) url.searchParams.set(key, value);
   });
 
-  // Timeout de 10s — sem isso, se a rede travar, o fetch fica pendurado pra sempre
-  // e a interação do Discord expira sem nenhum log de erro aparecer.
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
 
   try {
     const response = await fetch(url, {
-      headers: { "x-apisports-key": FOOTBALL_API_KEY },
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "bot-baguncinha"
+      },
       signal: controller.signal
     });
 
     if (!response.ok) {
-      throw new Error(`API-Football respondeu ${response.status}`);
+      throw new Error(`TheSportsDB respondeu ${response.status}`);
     }
 
-    return response.json();
+    const texto = await response.text();
+    if (!texto) return {};
+    return JSON.parse(texto);
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("Tempo esgotado conectando na API-Football (10s)");
+      throw new Error("Tempo esgotado conectando na TheSportsDB (12s)");
     }
     throw error;
   } finally {
@@ -1566,42 +1574,109 @@ async function footballApiFetch(endpoint, params) {
   }
 }
 
-// Confirma os IDs certos de cada competição e da Seleção (pra não depender só do fallback)
-async function descobrirIdsFutebol() {
-  if (!FOOTBALL_API_KEY) return;
-
-  for (const chave of Object.keys(LIGAS_BRASIL)) {
-    const liga = LIGAS_BRASIL[chave];
-    try {
-      const params = { name: liga.nome };
-      if (liga.country) params.country = liga.country;
-
-      const ligas = await footballApiFetch("/leagues", params);
-      if (ligas?.response?.length) {
-        liga.id = ligas.response[0].league.id;
-      }
-    } catch (error) {
-      console.error(`❌ Erro ao descobrir liga "${liga.nome}":`, error.message);
-    }
+function parseKickoffMs(evento) {
+  if (evento.strTimestamp) {
+    const bruto = String(evento.strTimestamp).trim().replace(" ", "T");
+    const comZona = /Z$|[+-]\d{2}:?\d{2}$/.test(bruto) ? bruto : `${bruto}Z`;
+    const t = Date.parse(comZona);
+    if (!Number.isNaN(t)) return t;
   }
 
-  try {
-    const times = await footballApiFetch("/teams", { name: "Brazil" });
-    const selecao = times?.response?.find(t => t.team.national === true);
-    if (selecao) {
-      SELECAO_TEAM_ID = selecao.team.id;
-    }
-  } catch (error) {
-    console.error("❌ Erro ao descobrir time da Seleção:", error.message);
+  if (evento.dateEvent && evento.strTime && evento.strTime !== "00:00:00") {
+    const t = Date.parse(`${evento.dateEvent}T${evento.strTime}Z`);
+    if (!Number.isNaN(t)) return t;
   }
 
-  const resumo = Object.entries(LIGAS_BRASIL)
-    .map(([chave, liga]) => `${chave}=${liga.id}`)
-    .join(", ");
-  console.log(`⚽ Competições: ${resumo} | Seleção: ${SELECAO_TEAM_ID}`);
+  if (evento.dateEvent) {
+    const t = Date.parse(`${evento.dateEvent}T15:00:00-03:00`);
+    if (!Number.isNaN(t)) return t;
+  }
+
+  return 0;
 }
 
-// Acha o canal #futebol, ou cria se não existir
+function normalizarStatusFutebol(status) {
+  const s = String(status || "").trim().toUpperCase();
+  if (!s || s === "NS" || s === "NOT STARTED" || s === "TIMED" || s === "TBD") return "NS";
+  if (["FT", "AET", "PEN", "FINISHED", "MATCH FINISHED", "AOT", "AP"].includes(s)) return "FT";
+  if (["PST", "POSTPONED", "CANC", "CANCELLED", "ABD", "SUSP"].includes(s)) return "OFF";
+  if (["1H", "2H", "HT", "ET", "P", "LIVE", "IN PLAY", "INT"].includes(s)) return "LIVE";
+  return s;
+}
+
+function nomeMandante(evento) {
+  return evento.strHomeTeam || "Mandante";
+}
+
+function nomeVisitante(evento) {
+  return evento.strAwayTeam || "Visitante";
+}
+
+function nomeCompeticao(evento) {
+  return evento.strLeague || "Futebol";
+}
+
+function formatarHorarioJogo(kickoffMs) {
+  if (!kickoffMs) return "horário indefinido";
+  const timestamp = Math.floor(kickoffMs / 1000);
+  return `<t:${timestamp}:F> (<t:${timestamp}:R>)`;
+}
+
+function deduplicarEventos(lista) {
+  const vistos = new Set();
+  const unicos = [];
+  for (const evento of lista) {
+    const id = String(evento.idEvent || `${evento.strEvent}-${evento.dateEvent}`);
+    if (vistos.has(id)) continue;
+    vistos.add(id);
+    unicos.push(evento);
+  }
+  return unicos;
+}
+
+async function coletarEventosFutebol() {
+  if (eventosFutebolCache.dados.length && Date.now() - eventosFutebolCache.timestamp < EVENTOS_CACHE_MS) {
+    return eventosFutebolCache.dados;
+  }
+
+  const eventos = [];
+  const chamadas = [];
+
+  for (const liga of LIGAS_FUTEBOL) {
+    chamadas.push({ tipo: "liga-next", id: liga.id });
+    chamadas.push({ tipo: "liga-past", id: liga.id });
+  }
+  chamadas.push({ tipo: "selecao-next" });
+  chamadas.push({ tipo: "selecao-last" });
+
+  for (const chamada of chamadas) {
+    try {
+      let lote = [];
+      if (chamada.tipo === "liga-next") {
+        const data = await sportsDbFetch("/eventsnextleague.php", { id: chamada.id });
+        lote = data?.events || [];
+      } else if (chamada.tipo === "liga-past") {
+        const data = await sportsDbFetch("/eventspastleague.php", { id: chamada.id });
+        lote = data?.events || [];
+      } else if (chamada.tipo === "selecao-next") {
+        const data = await sportsDbFetch("/eventsnext.php", { id: SELECAO_TEAM_ID });
+        lote = data?.events || [];
+      } else if (chamada.tipo === "selecao-last") {
+        const data = await sportsDbFetch("/eventslast.php", { id: SELECAO_TEAM_ID });
+        lote = data?.results || data?.events || [];
+      }
+      eventos.push(...lote);
+    } catch (error) {
+      console.error(`❌ Falha ao buscar jogos (${chamada.tipo} ${chamada.id || "selecao"}):`, error.message);
+    }
+    await esperar(250);
+  }
+
+  const unicos = deduplicarEventos(eventos);
+  eventosFutebolCache = { timestamp: Date.now(), dados: unicos };
+  return unicos;
+}
+
 async function ensureFutebolChannel(guild) {
   let channel = guild.channels.cache.find(
     c => c.name === "futebol" && c.type === ChannelType.GuildText
@@ -1612,7 +1687,7 @@ async function ensureFutebolChannel(guild) {
       channel = await guild.channels.create({
         name: "futebol",
         type: ChannelType.GuildText,
-        topic: "⚽ Avisos automáticos do Brasileirão e da Seleção Brasileira"
+        topic: "Avisos automáticos do Brasileirão, Libertadores e da Seleção Brasileira"
       });
       console.log("✅ Canal #futebol criado.");
     } catch (error) {
@@ -1625,43 +1700,27 @@ async function ensureFutebolChannel(guild) {
   return channel;
 }
 
-function formatarHorarioJogo(dataISO) {
-  const timestamp = Math.floor(new Date(dataISO).getTime() / 1000);
-  return `<t:${timestamp}:F> (<t:${timestamp}:R>)`;
-}
-
 async function checkFootball() {
-  if (!FOOTBALL_API_KEY || !futebolChannelId) return;
+  if (!futebolChannelId) return;
 
   const channel = client.channels.cache.get(futebolChannelId);
   if (!channel) return;
 
-  const hoje = new Date().toISOString().split("T")[0];
-  const ano = new Date().getFullYear();
-
   try {
-    const buscasLigas = Object.values(LIGAS_BRASIL).map(liga =>
-      footballApiFetch("/fixtures", { league: liga.id, season: ano, date: hoje })
-    );
-    const buscaSelecao = footballApiFetch("/fixtures", { team: SELECAO_TEAM_ID, date: hoje });
-
-    const resultados = await Promise.all([...buscasLigas, buscaSelecao]);
-
-    const fixtures = resultados.flatMap(resultado => resultado?.response || []);
-
+    const fixtures = await coletarEventosFutebol();
     const now = Date.now();
 
     for (const jogo of fixtures) {
-      const fixtureId = jogo.fixture.id;
-      const status = jogo.fixture.status.short;
-      const kickoff = new Date(jogo.fixture.date).getTime();
-      const minutosParaComecar = (kickoff - now) / 60000;
+      const fixtureId = String(jogo.idEvent || "");
+      if (!fixtureId) continue;
 
-      const mandante = jogo.teams.home.name;
-      const visitante = jogo.teams.away.name;
-      const competicao = jogo.league.name;
+      const status = normalizarStatusFutebol(jogo.strStatus);
+      const kickoff = parseKickoffMs(jogo);
+      const minutosParaComecar = kickoff ? (kickoff - now) / 60000 : Infinity;
+      const mandante = nomeMandante(jogo);
+      const visitante = nomeVisitante(jogo);
+      const competicao = nomeCompeticao(jogo);
 
-      // Aviso de "tá quase começando"
       if (
         status === "NS" &&
         minutosParaComecar > 0 &&
@@ -1675,22 +1734,19 @@ async function checkFootball() {
           .setDescription(
             `Partida chegando, cria! Se liga:\n\n` +
             `🏆 ${competicao}\n` +
-            `🕐 ${formatarHorarioJogo(jogo.fixture.date)}`
+            `🕐 ${formatarHorarioJogo(kickoff)}`
           )
           .setColor(0x2ecc71);
 
         channel.send({ embeds: [embed] }).catch(() => {});
       }
 
-      // Resultado final
-      if (
-        ["FT", "AET", "PEN"].includes(status) &&
-        !resultadosEnviados.has(fixtureId)
-      ) {
+      const acabouHaPouco = kickoff && now - kickoff >= 0 && now - kickoff <= FOOTBALL_RESULTADO_MAX_MS;
+      if (status === "FT" && acabouHaPouco && !resultadosEnviados.has(fixtureId)) {
         resultadosEnviados.add(fixtureId);
 
-        const golsMandante = jogo.goals.home;
-        const golsVisitante = jogo.goals.away;
+        const golsMandante = jogo.intHomeScore ?? "?";
+        const golsVisitante = jogo.intAwayScore ?? "?";
 
         const embed = new EmbedBuilder()
           .setTitle(`🏁 Acabou o jogo — ${mandante} ${golsMandante} x ${golsVisitante} ${visitante}`)
@@ -1718,10 +1774,9 @@ client.once("ready", async () => {
   setInterval(tickVoiceXp, VOICE_XP_INTERVAL_MS);
   console.log(`🎙️ Rastreamento de XP por voz ativado (a cada ${VOICE_XP_INTERVAL_MS / 60000} min)`);
 
-  // A verificação é configurada ANTES do futebol de propósito: descobrirIdsFutebol()
-  // faz várias chamadas de API que podem demorar (até 10s de timeout cada). Se a
-  // verificação fosse configurada só depois, qualquer reação que chegasse nesse
-  // meio-tempo seria ignorada porque verificacaoMessageId ainda estaria null.
+  // A verificação é configurada ANTES do futebol de propósito: as chamadas da
+  // TheSportsDB podem demorar. Se a verificação fosse configurada só depois,
+  // qualquer reação que chegasse nesse meio-tempo seria ignorada.
   const guildVerificacao = client.guilds.cache.get(GUILD_ID);
   if (guildVerificacao && !NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) {
     const canalVerificacao = await ensureVerificacaoChannel(guildVerificacao);
@@ -1740,19 +1795,18 @@ client.once("ready", async () => {
     console.log("⚠️ NAO_VERIFICADO_ROLE_ID não configurado — verificação desativada.");
   }
 
-  if (FOOTBALL_API_KEY) {
-    const guild = client.guilds.cache.get(GUILD_ID);
-    if (guild) {
-      const canal = await ensureFutebolChannel(guild);
-      if (canal) futebolChannelId = canal.id;
-    }
+  const guildFutebol = client.guilds.cache.get(GUILD_ID);
+  if (guildFutebol) {
+    const canal = await ensureFutebolChannel(guildFutebol);
+    if (canal) futebolChannelId = canal.id;
+  }
 
-    await descobrirIdsFutebol();
+  if (futebolChannelId) {
     setInterval(checkFootball, FOOTBALL_CHECK_INTERVAL_MS);
-    checkFootball(); // já confere uma vez assim que liga
-    console.log(`⚽ Avisos de futebol ativados (a cada ${FOOTBALL_CHECK_INTERVAL_MS / 60000} min)`);
+    checkFootball();
+    console.log(`⚽ Avisos de futebol ativados (a cada ${FOOTBALL_CHECK_INTERVAL_MS / 60000} min, TheSportsDB)`);
   } else {
-    console.log("⚠️ API_FOOTBALL_KEY não configurada — avisos de futebol desativados.");
+    console.log("⚠️ Canal #futebol não disponível — avisos de futebol desativados.");
   }
 });
 
@@ -2502,6 +2556,7 @@ client.on("interactionCreate", async interaction => {
         "🎰 `/roleta` — Aposta moedas na Roleta.\n" +
         "🪨 `/ppt` — Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.\n" +
         "🏆 `/conquistas` — Vê e resgata suas conquistas do servidor.\n" +
+        "⚽ `/jogos` — Próximos jogos do Brasileirão, Libertadores e da Seleção.\n" +
         "🎫 `/sortear` — Sorteia um ganhador entre quem tem ticket (só staff).\n"
       );
       console.log("✅ /help respondido");
@@ -3256,14 +3311,6 @@ client.on("interactionCreate", async interaction => {
     // JOGOS (BRASILEIRÃO + SELEÇÃO)
     // =========================
     if (interaction.commandName === "jogos") {
-      if (!FOOTBALL_API_KEY) {
-        await interaction.reply({
-          content: "❌ Os avisos de futebol ainda não tão configurados (falta a chave da API).",
-          ephemeral: true
-        });
-        return;
-      }
-
       await interaction.deferReply();
 
       try {
@@ -3272,18 +3319,16 @@ client.on("interactionCreate", async interaction => {
         if (jogosCache.dados && Date.now() - jogosCache.timestamp < JOGOS_CACHE_MS) {
           fixtures = jogosCache.dados;
         } else {
-          const ano = new Date().getFullYear();
+          const agora = Date.now();
+          const eventos = await coletarEventosFutebol();
 
-          const buscasLigas = Object.values(LIGAS_BRASIL).map(liga =>
-            footballApiFetch("/fixtures", { league: liga.id, season: ano, next: 3 })
-          );
-          const buscaSelecao = footballApiFetch("/fixtures", { team: SELECAO_TEAM_ID, next: 3 });
-
-          const resultados = await Promise.all([...buscasLigas, buscaSelecao]);
-
-          fixtures = resultados
-            .flatMap(resultado => resultado?.response || [])
-            .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
+          fixtures = eventos
+            .filter(jogo => {
+              const status = normalizarStatusFutebol(jogo.strStatus);
+              const kickoff = parseKickoffMs(jogo);
+              return status === "NS" || status === "LIVE" || (kickoff && kickoff >= agora - 3 * 60 * 60 * 1000);
+            })
+            .sort((a, b) => parseKickoffMs(a) - parseKickoffMs(b));
 
           jogosCache = { timestamp: Date.now(), dados: fixtures };
         }
@@ -3296,16 +3341,19 @@ client.on("interactionCreate", async interaction => {
         const linhas = fixtures
           .slice(0, 12)
           .map(jogo => {
+            const status = normalizarStatusFutebol(jogo.strStatus);
+            const prefixo = status === "LIVE" ? "🔴 AO VIVO " : "";
             return (
-              `⚽ **${jogo.teams.home.name} x ${jogo.teams.away.name}**\n` +
-              `　　🏆 ${jogo.league.name} — 🕐 ${formatarHorarioJogo(jogo.fixture.date)}`
+              `${prefixo}⚽ **${nomeMandante(jogo)} x ${nomeVisitante(jogo)}**\n` +
+              `　　🏆 ${nomeCompeticao(jogo)} — 🕐 ${formatarHorarioJogo(parseKickoffMs(jogo))}`
             );
           });
 
         const embed = new EmbedBuilder()
           .setTitle("📅 Próximos jogos")
           .setDescription(linhas.join("\n\n"))
-          .setColor(0x2ecc71);
+          .setColor(0x2ecc71)
+          .setFooter({ text: "Fonte: TheSportsDB" });
 
         await interaction.editReply({ embeds: [embed] });
       } catch (error) {
