@@ -45,7 +45,7 @@
   "1108518941434843290": {
     "textXp": 3,
     "textLevel": 2,
-    "voiceXp": 445,
+    "voiceXp": 481,
     "voiceLevel": 3,
     "lastMessageTimestamp": 1790641175995,
     "coins": 1366,
@@ -65,11 +65,11 @@
     "milestonesAlcancados": []
   },
   "1003450157137936444": {
-    "textXp": 11,
+    "textXp": 19,
     "textLevel": 1,
-    "voiceXp": 457,
+    "voiceXp": 475,
     "voiceLevel": 3,
-    "lastMessageTimestamp": 1790642107953,
+    "lastMessageTimestamp": 1790642432680,
     "coins": 450,
     "lastDaily": 1790559202515,
     "lastTrabalhar": 1790640307858,
@@ -107,7 +107,7 @@
   "1476695863874289786": {
     "textXp": 0,
     "textLevel": 1,
-    "voiceXp": 509,
+    "voiceXp": 527,
     "voiceLevel": 4,
     "lastMessageTimestamp": 0,
     "coins": 0,
@@ -127,7 +127,7 @@
   "598310043968077854": {
     "textXp": 0,
     "textLevel": 1,
-    "voiceXp": 15,
+    "voiceXp": 37,
     "voiceLevel": 3,
     "lastMessageTimestamp": 0,
     "coins": 0,
