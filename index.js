@@ -662,7 +662,7 @@ const LOJA_ITEMS = {
     tipo: "caixa"
   },
   ticket_sorteio: {
-    categoria: "Bilhetes",
+    categoria: "bilhetes",
     nome: "🎫 Ticket de Sorteio",
     preco: 700,
     descricao: "1 bilhete = 1 chance no próximo sorteio. (staff usa `/sortear`).",
@@ -1455,6 +1455,17 @@ const commands = [
         .setMinValue(0)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("sortear")
+    .setDescription("Sorteia um ganhador entre quem tem ticket de sorteio (staff).")
+    .addStringOption(option =>
+      option
+        .setName("premio")
+        .setDescription("O que está sendo sorteado (opcional)")
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
   new SlashCommandBuilder()
     .setName("bloquearcanais")
@@ -2490,7 +2501,8 @@ client.on("interactionCreate", async interaction => {
         "🪙 `/apostar` — Aposta suas moedas em cara ou coroa.\n" +
         "🎰 `/roleta` — Aposta moedas na Roleta.\n" +
         "🪨 `/ppt` — Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.\n" +
-        "🏆 `/conquistas` — Vê e resgata suas conquistas do servidor.\n"
+        "🏆 `/conquistas` — Vê e resgata suas conquistas do servidor.\n" +
+        "🎫 `/sortear` — Sorteia um ganhador entre quem tem ticket (só staff).\n"
       );
       console.log("✅ /help respondido");
       return;
@@ -2746,7 +2758,8 @@ client.on("interactionCreate", async interaction => {
       const data = getUserData(user.id);
 
       await interaction.reply(
-        `💰 A carteira de **${user.username}** tá com ${formatarMoedas(data.coins)}.`
+        `💰 A carteira de **${user.username}** tá com ${formatarMoedas(data.coins)}.\n` +
+        `🎫 Tickets de sorteio: **${data.ticketsSorteio || 0}**.`
       );
       console.log("✅ /carteira respondido");
       return;
@@ -3301,6 +3314,62 @@ client.on("interactionCreate", async interaction => {
       }
 
       console.log("✅ /jogos respondido");
+      return;
+    }
+
+    // =========================
+    // SORTEAR (STAFF)
+    // =========================
+    if (interaction.commandName === "sortear") {
+      const premio = interaction.options.getString("premio");
+
+      const participantes = [...xpData.entries()].filter(([, data]) => {
+        return data && typeof data === "object" && (data.ticketsSorteio || 0) > 0;
+      });
+
+      if (participantes.length === 0) {
+        await interaction.reply({
+          content: "❌ Ninguém tem ticket de sorteio. Compra na `/loja` primeiro.",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const pool = [];
+      let totalTickets = 0;
+      for (const [userId, data] of participantes) {
+        const tickets = data.ticketsSorteio;
+        totalTickets += tickets;
+        for (let i = 0; i < tickets; i++) {
+          pool.push(userId);
+        }
+      }
+
+      const vencedorId = pool[Math.floor(Math.random() * pool.length)];
+      const ticketsVencedor = getUserData(vencedorId).ticketsSorteio;
+
+      for (const [, data] of participantes) {
+        data.ticketsSorteio = 0;
+      }
+      salvarDados();
+
+      const vencedor = await client.users.fetch(vencedorId).catch(() => null);
+      const nomeVencedor = vencedor ? vencedor.username : "Usuário desconhecido";
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 Resultado do Sorteio")
+        .setDescription(
+          `🎉 O ganhador foi <@${vencedorId}> (**${nomeVencedor}**)!\n\n` +
+          (premio ? `🎁 Prêmio: **${premio}**\n\n` : "") +
+          `Tinha **${ticketsVencedor}** ticket(s) de **${totalTickets}** no total.\n` +
+          `Participantes: **${participantes.length}**.`
+        )
+        .setColor(0xf1c40f)
+        .setThumbnail(vencedor?.displayAvatarURL({ size: 256 }) || null)
+        .setFooter({ text: "Todos os tickets foram consumidos neste sorteio." });
+
+      await interaction.reply({ embeds: [embed] });
+      console.log("✅ /sortear respondido");
       return;
     }
 
