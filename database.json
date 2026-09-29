@@ -3,11 +3,11 @@
   "servidores": {},
   "configuracoes": {},
   "1021571720718585997": {
-    "textXp": 10,
+    "textXp": 23,
     "textLevel": 1,
-    "voiceXp": 11,
+    "voiceXp": 30,
     "voiceLevel": 3,
-    "lastMessageTimestamp": 1790601518525,
+    "lastMessageTimestamp": 1790650290310,
     "coins": 1321,
     "lastDaily": 0,
     "lastTrabalhar": 1790592307213,
@@ -45,7 +45,7 @@
   "1108518941434843290": {
     "textXp": 60,
     "textLevel": 2,
-    "voiceXp": 445,
+    "voiceXp": 468,
     "voiceLevel": 4,
     "lastMessageTimestamp": 1790647093865,
     "coins": 0,
@@ -67,7 +67,7 @@
   "1003450157137936444": {
     "textXp": 33,
     "textLevel": 1,
-    "voiceXp": 367,
+    "voiceXp": 383,
     "voiceLevel": 4,
     "lastMessageTimestamp": 1790642890808,
     "coins": 2701,
@@ -107,7 +107,7 @@
   "1476695863874289786": {
     "textXp": 7,
     "textLevel": 1,
-    "voiceXp": 216,
+    "voiceXp": 239,
     "voiceLevel": 5,
     "lastMessageTimestamp": 1790647506966,
     "coins": 0,
