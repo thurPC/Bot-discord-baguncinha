@@ -184,5 +184,7 @@
     "itemLendario": false,
     "milestonesAlcancados": []
   },
-  "__lojaImagens": {}
+  "__lojaImagens": {
+    "cargo_pirata": "https://cdn.discordapp.com/attachments/1552387591704158378/1554417450047766528/image0.jpg?ex=6abccf8f&is=6abb7e0f&hm=5b0c598c340926eb5bcbfb5358cbc1e308ec4a838741840f4e0c2969a79a99f0&"
+  }
 }
