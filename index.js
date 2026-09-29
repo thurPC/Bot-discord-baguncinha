@@ -575,7 +575,7 @@ const LOJA_ITEMS = {
   // ---- 11 cargos novos (troque os COLOQUE_ID_x pelos IDs reais; nomes/preços são sugestões) ----
   cargo_lenda: {
     categoria: "cargos",
-    nome: "🌟 Cargo Estrela",
+    nome: "Cargo celestial",
     preco: 3000,
     descricao: "Cargo brilhante pro seu perfil.",
     tipo: "cargo",
@@ -583,7 +583,7 @@ const LOJA_ITEMS = {
   },
   cargo_fogo: {
     categoria: "cargos",
-    nome: "🔥 Cargo Fogo",
+    nome: "Cargo pelėzin",
     preco: 3500,
     descricao: "Cor de nome quente.",
     tipo: "cargo",
@@ -591,7 +591,7 @@ const LOJA_ITEMS = {
   },
   cargo_gelo: {
     categoria: "cargos",
-    nome: "❄️ Cargo Gelo",
+    nome: "67",
     preco: 3500,
     descricao: "Cor de nome gelada.",
     tipo: "cargo",
@@ -599,7 +599,7 @@ const LOJA_ITEMS = {
   },
   cargo_natureza: {
     categoria: "cargos",
-    nome: "🌿 Cargo Natureza",
+    nome: "monge",
     preco: 3500,
     descricao: "Cor de nome verde.",
     tipo: "cargo",
@@ -607,7 +607,7 @@ const LOJA_ITEMS = {
   },
   cargo_realeza: {
     categoria: "cargos",
-    nome: "👑 Cargo Realeza",
+    nome: "Supremo",
     preco: 8000,
     descricao: "Pra quem manda no rolê.",
     tipo: "cargo",
@@ -615,7 +615,7 @@ const LOJA_ITEMS = {
   },
   cargo_ninja: {
     categoria: "cargos",
-    nome: "🥷 Cargo Ninja",
+    nome: "157",
     preco: 4000,
     descricao: "Discreto e mortal.",
     tipo: "cargo",
@@ -623,7 +623,7 @@ const LOJA_ITEMS = {
   },
   cargo_gamer: {
     categoria: "cargos",
-    nome: "🎮 Cargo Gamer",
+    nome: "171",
     preco: 3000,
     descricao: "Pra quem vive online.",
     tipo: "cargo",
@@ -631,7 +631,7 @@ const LOJA_ITEMS = {
   },
   cargo_musico: {
     categoria: "cargos",
-    nome: "🎧 Cargo Músico",
+    nome: "777",
     preco: 3000,
     descricao: "Pra quem vive de fone.",
     tipo: "cargo",
@@ -639,7 +639,7 @@ const LOJA_ITEMS = {
   },
   cargo_dragao: {
     categoria: "cargos",
-    nome: "🐉 Cargo Dragão",
+    nome: "coroa",
     preco: 7000,
     descricao: "Cargo raro e imponente.",
     tipo: "cargo",
@@ -647,7 +647,7 @@ const LOJA_ITEMS = {
   },
   cargo_alien: {
     categoria: "cargos",
-    nome: "👽 Cargo Alien",
+    nome: "Veterano",
     preco: 4500,
     descricao: "Não é deste mundo.",
     tipo: "cargo",
@@ -655,7 +655,7 @@ const LOJA_ITEMS = {
   },
   cargo_milionario: {
     categoria: "cargos",
-    nome: "💸 Cargo Milionário",
+    nome: "milionario",
     preco: 10000,
     descricao: "Pra exibir sua grana.",
     tipo: "cargo",
