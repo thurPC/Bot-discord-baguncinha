@@ -3120,7 +3120,7 @@ client.on("interactionCreate", async interaction => {
 
       if (now - data.lastRoleta < ROLETA_COOLDOWN_MS) {
         const restante = ROLETA_COOLDOWN_MS - (now - data.lastRoleta);
-        const segundos = Math.ceil(restante / 100);
+        const segundos = Math.ceil(restante / 8000);
         await interaction.reply({
           content: `⏳ A roleta ainda tá girando. Espera ~${segundos}s.`,
           ephemeral: true
