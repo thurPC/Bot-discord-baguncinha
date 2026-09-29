@@ -565,11 +565,11 @@ const LOJA_ITEMS = {
   },
   cargo_neon: {
     categoria: "cargos",
-    nome: "Cargo monge",
+    nome: "Cargo ",
     preco: 6000,
-    descricao: "Cor de nome diferenciado.",
+    descricao: ".",
     tipo: "cargo",
-    roleId: "1554310974020784189"
+    roleId: ""
   },
 
   // ---- 11 cargos novos (troque os COLOQUE_ID_x pelos IDs reais; nomes/preços são sugestões) ----
@@ -577,15 +577,15 @@ const LOJA_ITEMS = {
     categoria: "cargos",
     nome: "Cargo celestial",
     preco: 3000,
-    descricao: "Cargo brilhante pro seu perfil.",
+    descricao: "Mídia.",
     tipo: "cargo",
     roleId: "1554311367199031396"
   },
   cargo_pelėzi: {
     categoria: "cargos",
-    nome: "cargo pelėzin",
+    nome: "Cargo Pelėzin",
     preco: 3500,
-    descricao: "Cor de nome quente.",
+    descricao: "pelé?.",
     tipo: "cargo",
     roleId: "1554318597520887808"
   },
@@ -593,71 +593,71 @@ const LOJA_ITEMS = {
     categoria: "cargos",
     nome: "cargo 67",
     preco: 3500,
-    descricao: "Cor de nome gelada.",
+    descricao: "aura.",
     tipo: "cargo",
     roleId: "1554315725047332905"
   },
   cargo_monge: {
     categoria: "cargos",
-    nome: "cargo monge",
+    nome: "Cargo Monge",
     preco: 3500,
-    descricao: "Cor de nome verde.",
+    descricao: "?",
     tipo: "cargo",
     roleId: "1554310974020784189"
   },
   cargo_Supremo: {
     categoria: "cargos",
-    nome: "cargo Supremo",
+    nome: "Cargo Supremo",
     preco: 8000,
-    descricao: "Pra quem manda no rolê.",
+    descricao: "supremo.",
     tipo: "cargo",
     roleId: "1554313350043664464"
   },
   cargo_157: {
     categoria: "cargos",
-    nome: "cargo 157",
+    nome: "Cargo 157",
     preco: 4000,
-    descricao: "Discreto e mortal.",
+    descricao: "🚩",
     tipo: "cargo",
     roleId: "1554315527021658152"
   },
   cargo_171: {
     categoria: "cargos",
-    nome: "cargo 171",
+    nome: "Cargo 171",
     preco: 3000,
-    descricao: "Pra quem vive online.",
+    descricao: "Estelionatario bigode?",
     tipo: "cargo",
     roleId: "1554315568125845525"
   },
   cargo_777: {
     categoria: "cargos",
-    nome: "cargo 777",
+    nome: "Cargo 777",
     preco: 3000,
-    descricao: "Pra quem vive de fone.",
+    descricao: "🎰",
     tipo: "cargo",
     roleId: "1554315611281166366"
   },
   cargo_coroa: {
     categoria: "cargos",
-    nome: "cargo coroa",
+    nome: "Cargo Coroa",
     preco: 7000,
-    descricao: "Cargo raro e imponente.",
+    descricao: "duo Cara?.",
     tipo: "cargo",
     roleId: "1554318085027143821"
   },
-  cargo_: {
+  cargo_cara: {
     categoria: "cargos",
-    nome: "cargo ",
+    nome: "Cargo Cara ",
     preco: 4500,
-    descricao: "Não é deste mundo.",
+    descricao: "duo coroa?.",
     tipo: "cargo",
-    roleId: ""
+    roleId: "1554317867422322728"
   },
   cargo_milionario: {
     categoria: "cargos",
-    nome: "cargo milionario",
+    nome: "Cargo Milionario",
     preco: 10000,
-    descricao: "Pra exibir sua grana.",
+    descricao: "Riquinho?",
     tipo: "cargo",
     roleId: "1553051456293048540"
   },
@@ -755,7 +755,7 @@ const ROLETA_RESULTADOS = [
   { label: "🔹 1x — Empatou", multiplicador: 1, peso: 20 },
   { label: "🎉 2x — Dobrou!", multiplicador: 2, peso: 14 },
   { label: "🔥 5x — Grande vitória!", multiplicador: 5, peso: 5 },
-  { label: "💎 JACKPOT 10X!!! 💎", multiplicador: 10, peso: 1 }
+  { label: "💎 JACKPOT **10X**!!! 💎", multiplicador: 10, peso: 1 }
 ];
 
 function sortearRoleta() {
@@ -782,7 +782,7 @@ const CONQUISTAS = {
     descricao: "Fique 30 dias no servidor.",
     condicao: member => Date.now() - member.joinedTimestamp >= 30 * 24 * 60 * 60 * 1000,
     moedas: 5000,
-    roleId: "COLOQUE_O_ID_DO_CARGO_VETERANO_AQUI",
+    roleId: "1552496174882234479",
     badge: "🎖️ Badge Veterano"
   }
 };
