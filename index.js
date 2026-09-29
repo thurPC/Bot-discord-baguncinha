@@ -15,7 +15,9 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  Partials
+  Partials,
+  ContextMenuCommandBuilder,
+  ApplicationCommandType
 } = require("discord.js");
 const http = require("http");
 const fs = require("fs");
@@ -1470,7 +1472,12 @@ const commands = [
   new SlashCommandBuilder()
     .setName("bloquearcanais")
     .setDescription("Bloqueia a visão de todos os canais pro cargo Não Verificado (roda uma vez, admin).")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new ContextMenuCommandBuilder()
+    .setName("Editar embed")
+    .setType(ApplicationCommandType.Message)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
 
 ].map(command => command.toJSON());
 
@@ -2161,17 +2168,92 @@ function descreverBotao(botao, indice) {
   return `${indice + 1}. 💬 **${botao.label}** → responde: "${botao.texto}"`;
 }
 
+function botoesFromMensagem(mensagem) {
+  const botoes = [];
+  for (const row of mensagem.components || []) {
+    for (const comp of row.components || []) {
+      const label = comp.label || "Botão";
+      const customId = comp.customId || "";
+      if (comp.style === ButtonStyle.Link && comp.url) {
+        botoes.push({ tipo: "link", label, url: comp.url });
+      } else if (customId.startsWith("embedbtn:cargo:")) {
+        botoes.push({ tipo: "cargo", label, roleId: customId.slice("embedbtn:cargo:".length) });
+      } else if (customId.startsWith("embedbtn:msg:")) {
+        botoes.push({ tipo: "msg", label, texto: customId.slice("embedbtn:msg:".length) });
+      }
+    }
+  }
+  return botoes.slice(0, EMBED_BOTOES_MAX);
+}
+
+function draftFromMensagem(mensagem, autorNome) {
+  const embed = mensagem.embeds[0];
+  return {
+    titulo: embed.title || "Sem título",
+    descricao: embed.description || " ",
+    cor: Number.isInteger(embed.color) ? embed.color : 0x5865f2,
+    imagemUrl: embed.image?.url || null,
+    footer: embed.footer?.text || null,
+    linkTitulo: embed.url || null,
+    canalId: mensagem.channelId,
+    botoes: botoesFromMensagem(mensagem),
+    autorNome,
+    editMessageId: mensagem.id,
+    editChannelId: mensagem.channelId
+  };
+}
+
+async function handleEditarEmbedContext(interaction) {
+  const mensagem = interaction.targetMessage;
+
+  if (!mensagem) {
+    await interaction.reply({ content: "❌ Não achei essa mensagem.", ephemeral: true });
+    return;
+  }
+
+  if (!client.user || mensagem.author.id !== client.user.id) {
+    await interaction.reply({
+      content: "❌ Só dá pra editar embeds que eu postei pelo `/embed`.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (!mensagem.embeds.length) {
+    await interaction.reply({
+      content: "❌ Essa mensagem não tem embed pra editar.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  const draft = draftFromMensagem(mensagem, interaction.user.username);
+  embedDrafts.set(interaction.user.id, draft);
+
+  await interaction.reply({
+    ...payloadEmbedBuilder(draft),
+    ephemeral: true
+  });
+
+  console.log("✅ Apps → Editar embed aberto");
+}
+
 // Tudo que o construtor mostra: texto com a lista de botões + prévia + controles
 function payloadEmbedBuilder(draft) {
   const botoes = draft.botoes || [];
-  const conteudo = botoes.length > 0
-    ? `**Botões do embed (${botoes.length}/${EMBED_BOTOES_MAX}):**\n${botoes.map(descreverBotao).join("\n")}`
-    : null;
+  const partes = [];
+
+  if (draft.editMessageId) {
+    partes.push("✏️ Editando o embed publicado. Clique em **Salvar alterações** pra atualizar a mensagem.");
+  }
+  if (botoes.length > 0) {
+    partes.push(`**Botões do embed (${botoes.length}/${EMBED_BOTOES_MAX}):**\n${botoes.map(descreverBotao).join("\n")}`);
+  }
 
   return {
-    content: conteudo,
+    content: partes.length > 0 ? partes.join("\n\n") : null,
     embeds: [montarPreviewEmbed(draft)],
-    components: montarComponentesEmbedBuilder(),
+    components: montarComponentesEmbedBuilder(draft),
     allowedMentions: { parse: [] }
   };
 }
@@ -2191,12 +2273,15 @@ function montarPreviewEmbed(draft) {
   return embed;
 }
 
-function montarComponentesEmbedBuilder() {
+function montarComponentesEmbedBuilder(draft) {
+  const editando = Boolean(draft?.editMessageId);
+
   const linhaCanal = new ActionRowBuilder().addComponents(
     new ChannelSelectMenuBuilder()
       .setCustomId("embedbuilder_canal")
-      .setPlaceholder("📌 Escolher canal (padrão: este canal)")
+      .setPlaceholder(editando ? "📌 Canal travado (editando a mensagem)" : "📌 Escolher canal (padrão: este canal)")
       .addChannelTypes(ChannelType.GuildText)
+      .setDisabled(editando)
   );
 
   const linhaCor = new ActionRowBuilder().addComponents(
@@ -2212,13 +2297,18 @@ function montarComponentesEmbedBuilder() {
   );
 
   const linhaBotoes1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("embedbuilder_titulo").setLabel("📝 Título").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("embedbuilder_descricao").setLabel("📄 Texto").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("embedbuilder_imagem").setLabel("🖼️ Imagem").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("embedbuilder_footer").setLabel("📌 Rodapé").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("embedbuilder_link").setLabel("🔗 Link do título").setStyle(ButtonStyle.Secondary)
   );
 
   const linhaBotoes2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("embedbuilder_publicar").setLabel("✅ Publicar").setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("embedbuilder_publicar")
+      .setLabel(editando ? "💾 Salvar alterações" : "✅ Publicar")
+      .setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("embedbuilder_cancelar").setLabel("❌ Cancelar").setStyle(ButtonStyle.Danger)
   );
 
@@ -2249,26 +2339,53 @@ async function handleEmbedBuilderInteraction(interaction) {
     return;
   }
 
-  // Botões que abrem um modal (imagem, rodapé, link)
-  if (interaction.isButton() && ["embedbuilder_imagem", "embedbuilder_footer", "embedbuilder_link"].includes(interaction.customId)) {
+  // Botões que abrem um modal (título, texto, imagem, rodapé, link)
+  if (interaction.isButton() && ["embedbuilder_titulo", "embedbuilder_descricao", "embedbuilder_imagem", "embedbuilder_footer", "embedbuilder_link"].includes(interaction.customId)) {
     const campoMap = {
+      embedbuilder_titulo: {
+        customId: "embedbuilder_modal_titulo",
+        titulo: "Título do embed",
+        label: "Título",
+        valorAtual: draft.titulo || "",
+        estilo: TextInputStyle.Short,
+        max: 256,
+        obrigatorio: true
+      },
+      embedbuilder_descricao: {
+        customId: "embedbuilder_modal_descricao",
+        titulo: "Texto do embed",
+        label: "Descrição",
+        valorAtual: (draft.descricao || "").slice(0, 4000),
+        estilo: TextInputStyle.Paragraph,
+        max: 4000,
+        obrigatorio: true
+      },
       embedbuilder_imagem: {
         customId: "embedbuilder_modal_imagem",
         titulo: "Link da imagem",
         label: "URL da imagem (vazio = remover)",
-        valorAtual: draft.imagemUrl || ""
+        valorAtual: draft.imagemUrl || "",
+        estilo: TextInputStyle.Short,
+        max: 400,
+        obrigatorio: false
       },
       embedbuilder_footer: {
         customId: "embedbuilder_modal_footer",
         titulo: "Rodapé do embed",
         label: "Texto do rodapé (vazio = remover)",
-        valorAtual: draft.footer || ""
+        valorAtual: draft.footer || "",
+        estilo: TextInputStyle.Short,
+        max: 2048,
+        obrigatorio: false
       },
       embedbuilder_link: {
         customId: "embedbuilder_modal_link",
         titulo: "Link do título",
         label: "URL que o título vai abrir (vazio = remover)",
-        valorAtual: draft.linkTitulo || ""
+        valorAtual: draft.linkTitulo || "",
+        estilo: TextInputStyle.Short,
+        max: 400,
+        obrigatorio: false
       }
     };
 
@@ -2278,9 +2395,11 @@ async function handleEmbedBuilderInteraction(interaction) {
     const input = new TextInputBuilder()
       .setCustomId("valor")
       .setLabel(campo.label)
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false)
-      .setValue(campo.valorAtual);
+      .setStyle(campo.estilo || TextInputStyle.Short)
+      .setRequired(Boolean(campo.obrigatorio))
+      .setMaxLength(campo.max || 400);
+
+    if (campo.valorAtual) input.setValue(campo.valorAtual);
 
     modal.addComponents(new ActionRowBuilder().addComponents(input));
     await interaction.showModal(modal);
@@ -2352,8 +2471,36 @@ async function handleEmbedBuilderInteraction(interaction) {
     return;
   }
 
-  // Publicar
+  // Publicar / salvar edição
   if (interaction.isButton() && interaction.customId === "embedbuilder_publicar") {
+    if (draft.editMessageId) {
+      const canal = await interaction.guild.channels.fetch(draft.editChannelId).catch(() => null);
+      const mensagem = canal
+        ? await canal.messages.fetch(draft.editMessageId).catch(() => null)
+        : null;
+
+      if (!mensagem) {
+        await interaction.reply({ content: "❌ Não achei a mensagem original pra editar.", ephemeral: true });
+        return;
+      }
+
+      try {
+        await mensagem.edit({
+          embeds: [montarPreviewEmbed(draft)],
+          components: montarBotoesPublicos(draft.botoes)
+        });
+        embedDrafts.delete(userId);
+        await interaction.update({ content: `✅ Embed atualizado em ${canal}.`, embeds: [], components: [] });
+      } catch (error) {
+        console.error("❌ Erro ao editar embed:", error);
+        await interaction.reply({
+          content: "❌ Não consegui editar essa mensagem. Confere se eu tenho permissão no canal.",
+          ephemeral: true
+        });
+      }
+      return;
+    }
+
     const canal = draft.canalId
       ? await interaction.guild.channels.fetch(draft.canalId).catch(() => null)
       : interaction.channel;
@@ -2429,7 +2576,19 @@ async function handleEmbedBuilderInteraction(interaction) {
   if (interaction.isModalSubmit()) {
     const valor = interaction.fields.getTextInputValue("valor").trim();
 
-    if (interaction.customId === "embedbuilder_modal_imagem") {
+    if (interaction.customId === "embedbuilder_modal_titulo") {
+      if (!valor) {
+        await interaction.reply({ content: "❌ O título não pode ficar vazio.", ephemeral: true });
+        return;
+      }
+      draft.titulo = valor.slice(0, 256);
+    } else if (interaction.customId === "embedbuilder_modal_descricao") {
+      if (!valor) {
+        await interaction.reply({ content: "❌ O texto não pode ficar vazio.", ephemeral: true });
+        return;
+      }
+      draft.descricao = valor.slice(0, 4096);
+    } else if (interaction.customId === "embedbuilder_modal_imagem") {
       draft.imagemUrl = urlValida(valor) ? valor : null;
     } else if (interaction.customId === "embedbuilder_modal_footer") {
       draft.footer = valor || null;
@@ -2509,6 +2668,18 @@ client.on("interactionCreate", async interaction => {
     return;
   }
 
+  if (interaction.isMessageContextMenuCommand() && interaction.commandName === "Editar embed") {
+    try {
+      await handleEditarEmbedContext(interaction);
+    } catch (error) {
+      console.error("❌ Erro no Apps → Editar embed:", error);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: "❌ Não consegui abrir o editor desse embed.", ephemeral: true }).catch(() => {});
+      }
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -2544,6 +2715,7 @@ client.on("interactionCreate", async interaction => {
         "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
         "💰 `/rankmoedas` — Ranking de quem tem mais moedas.\n" +
         "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
+        "✏️ Apps → **Editar embed** — Edita um anúncio já postado (só staff).\n" +
         "💰 `/carteira` — Vê quantas moedas você tem.\n" +
         "🎁 `/daily` — Recompensa diária de moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
