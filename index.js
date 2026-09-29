@@ -573,93 +573,93 @@ const LOJA_ITEMS = {
   },
 
   // ---- 11 cargos novos (troque os COLOQUE_ID_x pelos IDs reais; nomes/preços são sugestões) ----
-  cargo_lenda: {
+  cargo_celestial: {
     categoria: "cargos",
     nome: "Cargo celestial",
     preco: 3000,
     descricao: "Cargo brilhante pro seu perfil.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_1"
+    roleId: "1554311367199031396"
   },
-  cargo_fogo: {
+  cargo_pelėzi: {
     categoria: "cargos",
-    nome: "Cargo pelėzin",
+    nome: "cargo pelėzin",
     preco: 3500,
     descricao: "Cor de nome quente.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_2"
+    roleId: "1554318597520887808"
   },
-  cargo_gelo: {
+  cargo_67: {
     categoria: "cargos",
-    nome: "67",
+    nome: "cargo 67",
     preco: 3500,
     descricao: "Cor de nome gelada.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_3"
+    roleId: "1554315725047332905"
   },
-  cargo_natureza: {
+  cargo_monge: {
     categoria: "cargos",
-    nome: "monge",
+    nome: "cargo monge",
     preco: 3500,
     descricao: "Cor de nome verde.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_4"
+    roleId: "1554310974020784189"
   },
-  cargo_realeza: {
+  cargo_Supremo: {
     categoria: "cargos",
-    nome: "Supremo",
+    nome: "cargo Supremo",
     preco: 8000,
     descricao: "Pra quem manda no rolê.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_5"
+    roleId: "1554313350043664464"
   },
-  cargo_ninja: {
+  cargo_157: {
     categoria: "cargos",
-    nome: "157",
+    nome: "cargo 157",
     preco: 4000,
     descricao: "Discreto e mortal.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_6"
+    roleId: "1554315527021658152"
   },
-  cargo_gamer: {
+  cargo_171: {
     categoria: "cargos",
-    nome: "171",
+    nome: "cargo 171",
     preco: 3000,
     descricao: "Pra quem vive online.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_7"
+    roleId: "1554315568125845525"
   },
-  cargo_musico: {
+  cargo_777: {
     categoria: "cargos",
-    nome: "777",
+    nome: "cargo 777",
     preco: 3000,
     descricao: "Pra quem vive de fone.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_8"
+    roleId: "1554315611281166366"
   },
-  cargo_dragao: {
+  cargo_coroa: {
     categoria: "cargos",
-    nome: "coroa",
+    nome: "cargo coroa",
     preco: 7000,
     descricao: "Cargo raro e imponente.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_9"
+    roleId: "1554318085027143821"
   },
-  cargo_alien: {
+  cargo_: {
     categoria: "cargos",
-    nome: "Veterano",
+    nome: "cargo ",
     preco: 4500,
     descricao: "Não é deste mundo.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_10"
+    roleId: ""
   },
   cargo_milionario: {
     categoria: "cargos",
-    nome: "milionario",
+    nome: "cargo milionario",
     preco: 10000,
     descricao: "Pra exibir sua grana.",
     tipo: "cargo",
-    roleId: "COLOQUE_ID_11"
+    roleId: "1553051456293048540"
   },
 
   caixa_baguncinha: {
