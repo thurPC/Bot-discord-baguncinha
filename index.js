@@ -547,17 +547,9 @@ const LOJA_ITEMS = {
     descricao: "Dobra o XP ganho (texto e voz) pela próxima 1 hora.",
     tipo: "xp_boost"
   },
-  cargo_vip: {
-    categoria: "cargos",
-    nome: "Cargo (??)",
-    preco: 12500,
-    descricao: "???",
-    tipo: "cargo",
-    roleId: ""
-  },
   cargo_pirata: {
     categoria: "cargos",
-    nome: "🏴‍☠️ Cargo Pirata",
+    nome: " Cargo Pirata",
     preco: 4500,
     descricao: "desbloquea novos canais pir2tas no servidor.",
     tipo: "cargo",
@@ -575,7 +567,7 @@ const LOJA_ITEMS = {
   // ---- 11 cargos novos (troque os COLOQUE_ID_x pelos IDs reais; nomes/preços são sugestões) ----
   cargo_celestial: {
     categoria: "cargos",
-    nome: "Cargo celestial",
+    nome: "Cargo Celestial",
     preco: 5000,
     descricao: "Mídia.",
     tipo: "cargo",
