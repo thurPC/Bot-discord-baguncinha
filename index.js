@@ -877,7 +877,7 @@ function montarEmbedItem(itemId) {
   const item = LOJA_ITEMS[itemId];
   const embed = new EmbedBuilder()
     .setTitle(item.nome)
-    .setDescription(`${item.descricao}\n\n**Preço:** ${formatarMoedas(item.preco)}`)
+    .setDescription(`${item.descricao}\n\n**PREÇO:** ${formatarMoedas(item.preco)}`)
     .setColor(0x9b59b6)
     .setFooter({ text: "**Baguncinha Store**" });
 
@@ -891,7 +891,7 @@ function montarComponentesItem(itemId) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`loja_comprar_${itemId}`)
-        .setLabel(`**COMPRAR** — ${item.preco}🪙`)
+        .setLabel(`COMPRAR — ${item.preco}🪙`)
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`loja_cat_${item.categoria}`)
@@ -1139,7 +1139,7 @@ async function handlePptInteraction(interaction) {
     }
 
     if (interaction.user.id !== match.desafianteId && interaction.user.id !== match.desafiadoId) {
-      await interaction.reply({ content: "❌ Esse desafio não é seu.", ephemeral: true });
+      await interaction.reply({ content: "❌ Esse desafio não é seu fi.", ephemeral: true });
       return;
     }
 
