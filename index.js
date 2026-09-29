@@ -550,8 +550,8 @@ const LOJA_ITEMS = {
   cargo_pirata: {
     categoria: "cargos",
     nome: " Cargo Pirata",
-    preco: 4500,
-    descricao: "desbloquea novos canais pir2tas no servidor.",
+    preco: 10000,
+    descricao: "desbloquea canais pir2tas no servidor.",
     tipo: "cargo",
     roleId: "1530739542733230251"
   },
@@ -583,7 +583,7 @@ const LOJA_ITEMS = {
   },
   cargo_67: {
     categoria: "cargos",
-    nome: "cargo 67",
+    nome: "Cargo 67",
     preco: 3500,
     descricao: "aura.",
     tipo: "cargo",
@@ -592,7 +592,7 @@ const LOJA_ITEMS = {
   cargo_monge: {
     categoria: "cargos",
     nome: "Cargo Monge",
-    preco: 3500,
+    preco: 2500,
     descricao: "?",
     tipo: "cargo",
     roleId: "1554310974020784189"
@@ -648,8 +648,8 @@ const LOJA_ITEMS = {
   cargo_milionario: {
     categoria: "cargos",
     nome: "Cargo Milionario",
-    preco: 10000,
-    descricao: "Riquinho?",
+    preco: 15000,
+    descricao: "mostra quem e o mais rico.",
     tipo: "cargo",
     roleId: "1553051456293048540"
   },
@@ -665,7 +665,7 @@ const LOJA_ITEMS = {
     categoria: "Bilhetes",
     nome: "🎫 Ticket de Sorteio",
     preco: 700,
-    descricao: "1 bilhete = 1 chance no próximo sorteio (staff usa `/sortear`).",
+    descricao: "1 bilhete = 1 chance no próximo sorteio. (staff usa `/sortear`).",
     tipo: "ticket"
   }
 };
