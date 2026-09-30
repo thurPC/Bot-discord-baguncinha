@@ -1786,6 +1786,7 @@ client.once("ready", async () => {
   // qualquer reação que chegasse nesse meio-tempo seria ignorada.
   const guildVerificacao = client.guilds.cache.get(GUILD_ID);
   if (guildVerificacao && !NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) {
+    await ensureInterestRoles(guildVerificacao);
     const canalVerificacao = await ensureVerificacaoChannel(guildVerificacao);
     if (canalVerificacao) {
       const mensagem = await ensureVerificacaoMessage(canalVerificacao);
@@ -1832,11 +1833,32 @@ const INTEREST_EMOJIS = {
   "⛏️": "minecraft",
   "🔫": "cs",
   "🧱": "roblox",
+  "🪂": "fortnite",
+  "⚽": "futebol",
+  "💎": "nitros",
+  "🏷️": "promocao",
   "💬": "geral"
 };
 
 const VERIFICACAO_MARCADOR = "verificacao-baguncinha";
 let verificacaoMessageId = null;
+
+function montarEmbedVerificacao() {
+  const lista = Object.entries(INTEREST_EMOJIS)
+    .map(([emoji, interesse]) => `${emoji} — ${(NOMES_INTERESSES[interesse] || interesse).replace(/^[^\p{L}\p{N}]+/u, "").trim()}`)
+    .join("\n");
+
+  return new EmbedBuilder()
+    .setTitle("🔒 Verificação de acesso")
+    .setDescription(
+      "Bem-vindo(a) à Baguncinha! Pra liberar o acesso ao resto do servidor, reage aqui embaixo " +
+      "com o que você curte:\n\n" +
+      `${lista}\n\n` +
+      "Assim que reagir com pelo menos um, seu acesso já é liberado na hora."
+    )
+    .setColor(0x5865f2)
+    .setFooter({ text: VERIFICACAO_MARCADOR });
+}
 
 // O Discord às vezes devolve o nome do emoji da reação SEM o "variation selector"
 // (o caractere invisível U+FE0F que alguns emojis, tipo ⛏️, carregam). Se a chave em
@@ -1883,20 +1905,18 @@ async function ensureVerificacaoMessage(channel) {
       m => m.author.id === client.user.id && m.embeds[0]?.footer?.text === VERIFICACAO_MARCADOR
     );
 
+    const embed = montarEmbedVerificacao();
+
     if (existente) {
+      await existente.edit({ embeds: [embed] }).catch(() => {});
+      for (const emoji of Object.keys(INTEREST_EMOJIS)) {
+        const jaTem = existente.reactions.cache.some(
+          r => normalizarEmoji(r.emoji.name) === normalizarEmoji(emoji)
+        );
+        if (!jaTem) await existente.react(emoji).catch(() => {});
+      }
       return existente;
     }
-
-    const embed = new EmbedBuilder()
-      .setTitle("🔒 Verificação de acesso")
-      .setDescription(
-        "Bem-vindo(a) à Baguncinha! Pra liberar o acesso ao resto do servidor, reage aqui embaixo " +
-        "com o que você joga:\n\n" +
-        "🎯 — Valorant\n⛏️ — Minecraft\n🔫 — CS\n🧱 — Roblox\n💬 — Geral (só bater papo mesmo)\n\n" +
-        "Assim que reagir com pelo menos um, seu acesso já é liberado na hora."
-      )
-      .setColor(0x5865f2)
-      .setFooter({ text: VERIFICACAO_MARCADOR });
 
     const mensagem = await channel.send({ embeds: [embed] });
     for (const emoji of Object.keys(INTEREST_EMOJIS)) {
@@ -3725,6 +3745,10 @@ const INTEREST_ROLES = {
   minecraft: "1553649152779485272",
   cs: "1553649152779485272",
   roblox: "1553649152779485272",
+  fortnite: "COLOQUE_O_ID_DO_CARGO_FORTNITE",
+  futebol: "COLOQUE_O_ID_DO_CARGO_FUTEBOL",
+  nitros: "COLOQUE_O_ID_DO_CARGO_NITROS",
+  promocao: "COLOQUE_O_ID_DO_CARGO_PROMOCAO",
   geral: "1373017679379828908"
 };
 
@@ -3733,8 +3757,44 @@ const NOMES_INTERESSES = {
   minecraft: "⛏️ Minecraft",
   cs: "🔫 CS",
   roblox: "🧱 Roblox",
+  fortnite: "🪂 Fortnite",
+  futebol: "⚽ Futebol",
+  nitros: "💎 Nitros",
+  promocao: "🏷️ Promoções",
   geral: "💬 Geral"
 };
+
+async function ensureInterestRoles(guild) {
+  if (!guild) return;
+
+  await guild.roles.fetch().catch(() => {});
+
+  for (const [interesse, nome] of Object.entries(NOMES_INTERESSES)) {
+    const atual = INTEREST_ROLES[interesse];
+    if (atual && !String(atual).startsWith("COLOQUE_")) {
+      if (guild.roles.cache.has(atual)) continue;
+    }
+
+    const nomeCargo = nome.replace(/^[^\p{L}\p{N}]+/u, "").trim();
+    let cargo = guild.roles.cache.find(r => r.name.toLowerCase() === nomeCargo.toLowerCase());
+
+    if (!cargo) {
+      try {
+        cargo = await guild.roles.create({
+          name: nomeCargo,
+          mentionable: false,
+          reason: `Cargo de interesse: ${nomeCargo}`
+        });
+        console.log(`✅ Cargo de interesse criado: ${nomeCargo} (${cargo.id})`);
+      } catch (error) {
+        console.error(`❌ Não consegui criar o cargo "${nomeCargo}":`, error.message);
+        continue;
+      }
+    }
+
+    INTEREST_ROLES[interesse] = cargo.id;
+  }
+}
 
 // =========================
 // SERVIDOR HTTP — RENDER (só pra manter o serviço vivo)
