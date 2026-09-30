@@ -2724,8 +2724,8 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "help") {
       await interaction.reply(
         "**🤖 Bot Baguncinha — oq posso fazer no server**\n\n" +
-        "🏓 `/ping` — Confere se eu tô on e suave.\n" +
-        "❓ `/help` — mostra todos os comandos.\n" +
+        "🏓 `/ping` — Confere se eu tô on e de boa.\n" +
+        "❓ `/help` — mostra todos os comandos disponivel.\n" +
         "🖼️ `/avatar` — Manda a foto de alguém em HD.\n" +
         "👤 `/userinfo` — Perfil completo da pessoa.\n" +
         "🏠 `/serverinfo` — Os dados do nosso servidor.\n" +
@@ -2735,7 +2735,6 @@ client.on("interactionCreate", async interaction => {
         "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
         "💰 `/rankmoedas` — Ranking de quem tem mais moedas.\n" +
         "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
-        "✏️ Apps → **Editar embed** — Edita um anúncio já postado (só staff).\n" +
         "💰 `/carteira` — Vê quantas moedas você tem.\n" +
         "🎁 `/daily` — Recompensa diária de moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
