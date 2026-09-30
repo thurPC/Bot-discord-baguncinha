@@ -2748,8 +2748,7 @@ client.on("interactionCreate", async interaction => {
         "🎰 `/roleta` — Aposta moedas na Roleta.\n" +
         "🪨 `/ppt` — Desafia alguém pra Pedra, Papel ou Tesoura apostando moedas.\n" +
         "🏆 `/conquistas` — Vê e resgata suas conquistas do servidor.\n" +
-        "⚽ `/jogos` — Próximos jogos do Brasileirão, Libertadores e da Seleção.\n" +
-        "🎫 `/sortear` — Sorteia um ganhador entre quem tem ticket (só staff).\n"
+        "⚽ `/jogos` — Próximos jogos do Brasileirão, Libertadores e da Seleção.\n"
       );
       console.log("✅ /help respondido");
       return;
