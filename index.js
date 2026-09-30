@@ -1684,10 +1684,33 @@ async function coletarEventosFutebol() {
   return unicos;
 }
 
+function normalizarNomeCanal(nome) {
+  return String(nome || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+async function acharCanalPorNome(guild, nomesAlvo) {
+  if (!guild) return null;
+
+  await guild.channels.fetch().catch(() => {});
+
+  const alvos = nomesAlvo.map(normalizarNomeCanal);
+  const candidatos = [...guild.channels.cache.values()].filter(c => {
+    if (c.type !== ChannelType.GuildText && c.type !== ChannelType.GuildAnnouncement) return false;
+    return alvos.includes(normalizarNomeCanal(c.name));
+  });
+
+  if (candidatos.length === 0) return null;
+
+  candidatos.sort((a, b) => (a.createdTimestamp || 0) - (b.createdTimestamp || 0));
+  return candidatos[0];
+}
+
 async function ensureFutebolChannel(guild) {
-  let channel = guild.channels.cache.find(
-    c => c.name === "futebol" && c.type === ChannelType.GuildText
-  );
+  let channel = await acharCanalPorNome(guild, ["futebol", "football"]);
 
   if (!channel) {
     try {
@@ -1873,11 +1896,17 @@ const INTEREST_EMOJIS_NORMALIZADO = Object.fromEntries(
   Object.entries(INTEREST_EMOJIS).map(([emoji, interesse]) => [normalizarEmoji(emoji), interesse])
 );
 
-// Acha o canal #verificacao, ou cria se não existir
+function ehMensagemVerificacao(mensagem) {
+  if (!client.user || mensagem.author?.id !== client.user.id) return false;
+  const embed = mensagem.embeds[0];
+  if (!embed) return false;
+  if (embed.footer?.text === VERIFICACAO_MARCADOR) return true;
+  const titulo = String(embed.title || "");
+  return titulo.includes("Verificação") || titulo.includes("Verificacao");
+}
+
 async function ensureVerificacaoChannel(guild) {
-  let channel = guild.channels.cache.find(
-    c => c.name === "verificacao" && c.type === ChannelType.GuildText
-  );
+  let channel = await acharCanalPorNome(guild, ["verificacao", "verificação"]);
 
   if (!channel) {
     try {
@@ -1897,15 +1926,15 @@ async function ensureVerificacaoChannel(guild) {
   return channel;
 }
 
-// Acha a mensagem de verificação já existente, ou cria uma nova com as reações
 async function ensureVerificacaoMessage(channel) {
   try {
-    const mensagens = await channel.messages.fetch({ limit: 20 });
-    const existente = mensagens.find(
-      m => m.author.id === client.user.id && m.embeds[0]?.footer?.text === VERIFICACAO_MARCADOR
-    );
+    const mensagens = await channel.messages.fetch({ limit: 100 });
+    const existentes = [...mensagens.values()]
+      .filter(ehMensagemVerificacao)
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
     const embed = montarEmbedVerificacao();
+    const existente = existentes[0];
 
     if (existente) {
       await existente.edit({ embeds: [embed] }).catch(() => {});
