@@ -43,16 +43,16 @@
     "milestonesAlcancados": []
   },
   "1108518941434843290": {
-    "textXp": 184,
+    "textXp": 198,
     "textLevel": 3,
     "voiceXp": 828,
     "voiceLevel": 6,
-    "lastMessageTimestamp": 1790765885041,
-    "coins": 1627,
+    "lastMessageTimestamp": 1790785909829,
+    "coins": 15631,
     "lastDaily": 1790732097425,
     "lastTrabalhar": 1790732105038,
     "lastPescar": 1790736072777,
-    "lastRoubar": 1790778575564,
+    "lastRoubar": 1790785905193,
     "lastRoleta": 1790738412456,
     "presoAte": 1790779475564,
     "turboTrabalhar": true,
@@ -62,7 +62,9 @@
       "veterano"
     ],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [
+      10000
+    ]
   },
   "1003450157137936444": {
     "textXp": 61,
@@ -70,7 +72,7 @@
     "voiceXp": 416,
     "voiceLevel": 6,
     "lastMessageTimestamp": 1790785100704,
-    "coins": 27489,
+    "coins": 14485,
     "lastDaily": 1790737908574,
     "lastTrabalhar": 1790741530239,
     "lastPescar": 1790741490637,
