@@ -115,10 +115,11 @@ const ECONOMIA_RESET_VERSAO = 1;
 function resetarEconomia() {
   let afetados = 0;
   for (const data of xpData.values()) {
-    if (data.coins !== 0 || (data.milestonesAlcancados && data.milestonesAlcancados.length > 0)) {
+    if (data.coins !== 0 || data.banco !== 0 || (data.milestonesAlcancados && data.milestonesAlcancados.length > 0)) {
       afetados++;
     }
     data.coins = 0;
+    data.banco = 0;
     data.milestonesAlcancados = [];
   }
   return afetados;
@@ -350,6 +351,7 @@ function normalizarDadosUsuario(data) {
   data.voiceLevel = numero(data.voiceLevel, 1);
   data.lastMessageTimestamp = numero(data.lastMessageTimestamp);
   data.coins = numero(data.coins);
+  data.banco = numero(data.banco);
   data.lastDaily = numero(data.lastDaily);
   data.lastTrabalhar = numero(data.lastTrabalhar);
   data.lastPescar = numero(data.lastPescar);
@@ -375,6 +377,7 @@ function getUserData(userId) {
       voiceLevel: 1,
       lastMessageTimestamp: 0,
       coins: 0,
+      banco: 0,                // moedas guardadas no banco (protegidas de roubo)
       lastDaily: 0,
       lastTrabalhar: 0,
       lastPescar: 0,
@@ -499,6 +502,28 @@ const ROLETA_APOSTA_MIN = 100;
 const ROLETA_APOSTA_MAX = 20000;
 const PPT_APOSTA_MIN = 50;
 const PPT_APOSTA_MAX = 5000;
+
+// --- Banco / Roubo ---
+// O banco guarda moedas e te protege dos roubos sofridos (só a carteira pode ser
+// assaltada). Quem é pego roubando paga multa de 40% do valor TOTAL da vítima
+// (carteira + banco), debitando primeiro da carteira e depois do banco.
+const ROUBO_MULTA_PERCENTUAL = 0.4;
+const ROUBO_MIN_VITIMA = 50;        // a vítima precisa ter pelo menos isso na CARTEIRA pra valer a pena
+const ROUBO_SAQUE_MIN = 0.5;        // fração mínima da carteira roubada ao vencer o minigame
+const ROUBO_SAQUE_MAX = 0.8;        // fração máxima da carteira roubada ao vencer o minigame
+
+// Minigame de memória: 3 fases, sequências maiores e tempo curto. Acertar tudo
+// dá um saque alto; errar uma vez (ou estourar o tempo) = preso + multa.
+const ROUBO_SIMBOLOS = ["🍎", "🍌", "🍇", "🍒", "🍉", "🍋"];
+const ROUBO_RODADAS = [
+  { tamanho: 4, mostrarMs: 3500, jogarMs: 12000 },
+  { tamanho: 5, mostrarMs: 3500, jogarMs: 12000 },
+  { tamanho: 6, mostrarMs: 4500, jogarMs: 15000 }
+];
+
+function getTotalMoedas(data) {
+  return (data.coins || 0) + (data.banco || 0);
+}
 
 function getTrabalharCooldown(data) {
   return data.turboTrabalhar ? TRABALHAR_COOLDOWN_TURBO_MS : TRABALHAR_COOLDOWN_NORMAL_MS;
@@ -1256,6 +1281,194 @@ async function handlePptInteraction(interaction) {
 }
 
 // =========================
+// MINIGAME DE ROUBO ("arromba o cofre")
+// =========================
+// Antes o /roubar era só um sorteio de 40%. Agora o ladrão encara 3 fases de
+// memória com sequências cada vez maiores e tempo curto. Passar em tudo libera
+// um saque alto (% alta da carteira da vítima). Errar ou estourar o tempo =
+// PRESO + multa de 40% do valor total da vítima.
+
+// Monta as linhas de botões com os símbolos embaralhados (5 por linha).
+function montarBotoesRoubo(matchId, ordemSimbolos) {
+  const linhas = [];
+  for (let inicio = 0; inicio < ordemSimbolos.length; inicio += 5) {
+    const linha = new ActionRowBuilder();
+    ordemSimbolos.slice(inicio, inicio + 5).forEach((simbolo, i) => {
+      linha.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`roubo:${matchId}:${inicio + i}`)
+          .setEmoji(simbolo)
+          .setStyle(ButtonStyle.Secondary)
+      );
+    });
+    linhas.push(linha);
+  }
+  return linhas;
+}
+
+function esperarCollector(coletor) {
+  return new Promise(resolve => {
+    coletor.once("end", (_coletados, motivo) => resolve(motivo));
+  });
+}
+
+async function resolverRouboSucesso(interaction, alvo, ladrao, vitima, mensagem) {
+  const percentual = ROUBO_SAQUE_MIN + Math.random() * (ROUBO_SAQUE_MAX - ROUBO_SAQUE_MIN);
+  const roubado = Math.max(1, Math.floor(vitima.coins * percentual));
+
+  vitima.coins -= roubado;
+  ladrao.coins += roubado;
+
+  await verificarMarcosMoedas(interaction.guild, interaction.user.id, ladrao);
+  salvarDados();
+
+  const embed = new EmbedBuilder()
+    .setTitle("🕵️ ASSALTO PERFEITO!")
+    .setColor(0x27ae60)
+    .setDescription(
+      `<@${interaction.user.id}> arrombou o cofre e levou **${formatarMoedas(roubado)}** ` +
+      `(${Math.round(percentual * 100)}% da carteira) de <@${alvo.id}>!\n` +
+      `Agora a carteira da vítima tá com ${formatarMoedas(vitima.coins)}.`
+    );
+
+  await mensagem.edit({ content: "", embeds: [embed], components: [] }).catch(() => {});
+}
+
+async function resolverRouboFalha(interaction, alvo, ladrao, vitima, mensagem, motivo) {
+  const multa = Math.floor(getTotalMoedas(vitima) * ROUBO_MULTA_PERCENTUAL);
+
+  // O ladrão paga primeiro da carteira e depois do banco: o banco protege você
+  // de ser roubado, mas não de pagar a multa quando VOCÊ é quem foi pego.
+  let restante = multa;
+  const daCarteira = Math.min(Math.max(0, ladrao.coins), restante);
+  ladrao.coins -= daCarteira;
+  restante -= daCarteira;
+  const doBanco = Math.min(Math.max(0, ladrao.banco), restante);
+  ladrao.banco -= doBanco;
+  const pago = daCarteira + doBanco;
+
+  vitima.coins += pago; // a vítima é ressarcida com a multa
+  ladrao.presoAte = Date.now() + PRISAO_MS;
+
+  await verificarMarcosMoedas(interaction.guild, alvo.id, vitima);
+  salvarDados();
+
+  const embed = new EmbedBuilder()
+    .setTitle("🚨 PEGO NO FLAGRANTE!")
+    .setColor(0xe74c3c)
+    .setDescription(
+      `<@${interaction.user.id}> foi pego (${motivo}) tentando roubar <@${alvo.id}>!\n\n` +
+      `💸 Multa: **${formatarMoedas(multa)}** (40% do valor total da vítima)\n` +
+      `Pagou: ${formatarMoedas(pago)}${pago < multa ? " — não tinha tudo e entregou o que dava" : ""}\n` +
+      (pago > 0 ? `A vítima foi ressarcida com esse valor.\n` : "") +
+      `O ladrão ficou **PRESO por 15 minutos** (nada de trabalhar, pescar ou roubar).`
+    );
+
+  await mensagem.edit({ content: "", embeds: [embed], components: [] }).catch(() => {});
+}
+
+async function iniciarRouboMinigame(interaction, alvo, ladrao, vitima) {
+  const matchId = interaction.id;
+  const ladraoId = interaction.user.id;
+
+  await interaction.reply({
+    content:
+      `🕵️ **${interaction.user.username}** tá armando um assalto na carteira de **${alvo.username}**!\n` +
+      `São 3 fases de memória: decore a sequência e clique na ordem certa. ` +
+      `Se vacilar, paga **40% do valor total** da vítima e vai preso. Boa sorte.`,
+    ephemeral: false
+  });
+
+  const mensagem = await interaction.fetchReply();
+  const embed = new EmbedBuilder();
+
+  for (let r = 0; r < ROUBO_RODADAS.length; r++) {
+    const { tamanho, mostrarMs, jogarMs } = ROUBO_RODADAS[r];
+
+    // sequência sorteada (pode repetir símbolo — fica mais difícil)
+    const sequencia = Array.from(
+      { length: tamanho },
+      () => ROUBO_SIMBOLOS[Math.floor(Math.random() * ROUBO_SIMBOLOS.length)]
+    );
+    // os botões ficam numa ordem diferente da sequência, pra não entregar o jogo
+    const ordemBotoes = [...ROUBO_SIMBOLOS].sort(() => Math.random() - 0.5);
+
+    // 1) mostra a sequência por alguns segundos
+    embed
+      .setTitle(`🔓 Arrombando o cofre — Fase ${r + 1}/${ROUBO_RODADAS.length}`)
+      .setColor(0x2c3e50)
+      .setDescription(
+        `**Decore a sequência!**\n\n${sequencia.join(" ")}\n\n` +
+        `Ela some em ${(mostrarMs / 1000).toFixed(1)}s...`
+      );
+    await mensagem.edit({ content: "", embeds: [embed], components: [] }).catch(() => {});
+    await esperar(mostrarMs);
+
+    // 2) esconde a sequência e mostra os botões embaralhados
+    const componentes = montarBotoesRoubo(matchId, ordemBotoes);
+    embed
+      .setTitle(`🔓 Arrombando o cofre — Fase ${r + 1}/${ROUBO_RODADAS.length}`)
+      .setColor(0xe67e22)
+      .setDescription(
+        `Repita na **mesma ordem**! Cliques: 0/${tamanho}\n⏱️ ${Math.round(jogarMs / 1000)}s`
+      );
+    await mensagem.edit({ content: "", embeds: [embed], components }).catch(() => {});
+
+    // 3) coleta os cliques e valida na ordem
+    let posicao = 0;
+    let erro = false;
+
+    const coletor = mensagem.createMessageComponentCollector({
+      filter: i => i.customId.startsWith(`roubo:${matchId}:`),
+      time: jogarMs
+    });
+
+    coletor.on("collect", async i => {
+      if (i.user.id !== ladraoId) {
+        await i.reply({ content: "❌ Esse assalto não é seu, sai fora.", ephemeral: true }).catch(() => {});
+        return;
+      }
+
+      if (erro || posicao >= sequencia.length) {
+        await i.deferUpdate().catch(() => {});
+        return;
+      }
+
+      const indice = Number(i.customId.split(":")[2]);
+      const simbolo = ordemBotoes[indice];
+
+      if (simbolo !== sequencia[posicao]) {
+        erro = true;
+        await i.deferUpdate().catch(() => {});
+        coletor.stop("errou");
+        return;
+      }
+
+      posicao++;
+      await i.deferUpdate().catch(() => {});
+
+      if (posicao >= sequencia.length) {
+        coletor.stop("fase");
+        return;
+      }
+
+      embed.setDescription(`Boa! Cliques: ${posicao}/${tamanho}\n⏱️ Continua...`);
+      await mensagem.edit({ embeds: [embed], components: componentes }).catch(() => {});
+    });
+
+    const motivo = await esperarCollector(coletor);
+
+    if (erro || motivo !== "fase") {
+      const detalhe = erro ? "errou a sequência" : "deixou o tempo acabar";
+      await resolverRouboFalha(interaction, alvo, ladrao, vitima, mensagem, detalhe);
+      return;
+    }
+  }
+
+  await resolverRouboSucesso(interaction, alvo, ladrao, vitima, mensagem);
+}
+
+// =========================
 // COMANDOS
 // =========================
 const commands = [
@@ -1362,6 +1575,30 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("banco")
+    .setDescription("Guarda suas moedas no banco — dinheiro no banco fica protegido de roubos.")
+    .addStringOption(option =>
+      option
+        .setName("acao")
+        .setDescription("O que você quer fazer no banco")
+        .setRequired(false)
+        .addChoices(
+          { name: "Ver saldo", value: "ver" },
+          { name: "Depositar", value: "depositar" },
+          { name: "Sacar", value: "sacar" },
+          { name: "Depositar tudo", value: "depositar_tudo" },
+          { name: "Sacar tudo", value: "sacar_tudo" }
+        )
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("quantidade")
+        .setDescription("Quantidade (para depositar/sacar)")
+        .setRequired(false)
+        .setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
     .setName("daily")
     .setDescription("Resgata sua recompensa diária de moedas."),
 
@@ -1375,7 +1612,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("roubar")
-    .setDescription("Tenta roubar moedas de alguém. Corre o risco de dar errado.")
+    .setDescription("Tenta roubar a carteira de alguém num minigame. Se for pego, paga 40% do valor da vítima.")
     .addUserOption(option =>
       option.setName("usuario").setDescription("Quem você vai tentar roubar").setRequired(true)
     ),
@@ -2825,11 +3062,12 @@ client.on("interactionCreate", async interaction => {
         "🏆 `/rank` — Quem tá mandando mais no server todo.\n" +
         "💰 `/rankmoedas` — Ranking de quem tem mais moedas.\n" +
         "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
-        "💰 `/carteira` — Vê quantas moedas você tem.\n" +
+        "💰 `/carteira` — Vê quantas moedas você tem (carteira + banco).\n" +
+        "🏦 `/banco` — Guarda moedas no banco (protegidas de roubo) ou saca.\n" +
         "🎁 `/daily` — Recompensa diária de moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
         "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
-        "🕵️ `/roubar` — Tenta roubar moedas de alguém (pode se dar mal e ir PRESO).\n" +
+        "🕵️ `/roubar` — Minigame pra assaltar alguém; se for pego paga 40% do valor da vítima e vai PRESO.\n" +
         "🤝 `/doar` — Doa moedas pra outra pessoa.\n" +
         "🎪 `/loja` — Abre a Baguncinha Store com prévia dos itens.\n" +
         "🛍️ `/comprar` — Compra um item da loja direto por comando.\n" +
@@ -3024,7 +3262,7 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "rankmoedas") {
       const ranking = [...xpData.entries()]
         .map(([userId, dados]) => [userId, normalizarDadosUsuario(dados)])
-        .sort((a, b) => b[1].coins - a[1].coins)
+        .sort((a, b) => getTotalMoedas(b[1]) - getTotalMoedas(a[1]))
         .slice(0, 10);
 
       if (ranking.length === 0) {
@@ -3042,7 +3280,10 @@ client.on("interactionCreate", async interaction => {
         const user = usuarios[index];
         const nome = user ? user.username : "Usuário desconhecido";
         const posicao = MEDALHAS[index] || `**${index + 1}.**`;
-        return `${posicao} **${nome}** — ${formatarMoedas(data.coins)}`;
+        const detalheBanco = data.banco > 0
+          ? ` _(carteira ${formatarMoedas(data.coins)} + banco ${formatarMoedas(data.banco)})_`
+          : "";
+        return `${posicao} **${nome}** — ${formatarMoedas(getTotalMoedas(data))}${detalheBanco}`;
       });
 
       const embed = new EmbedBuilder()
@@ -3095,9 +3336,78 @@ client.on("interactionCreate", async interaction => {
 
       await interaction.reply(
         `💰 A carteira de **${user.username}** tá com ${formatarMoedas(data.coins)}.\n` +
+        `🏦 No banco: ${formatarMoedas(data.banco)} (total ${formatarMoedas(getTotalMoedas(data))}).\n` +
         `🎫 Tickets de sorteio: **${data.ticketsSorteio || 0}**.`
       );
       console.log("✅ /carteira respondido");
+      return;
+    }
+
+    // =========================
+    // BANCO
+    // =========================
+    if (interaction.commandName === "banco") {
+      const data = getUserData(interaction.user.id);
+      const acao = interaction.options.getString("acao") || "ver";
+      const quantidade = interaction.options.getInteger("quantidade");
+
+      const resumoBanco = () =>
+        `🏦 **Banco de ${interaction.user.username}**\n` +
+        `👛 Carteira: ${formatarMoedas(data.coins)}\n` +
+        `🏦 Banco: ${formatarMoedas(data.banco)}\n` +
+        `💰 Total: ${formatarMoedas(getTotalMoedas(data))}\n\n` +
+        `_Moedas no banco ficam protegidas de roubos — só a carteira pode ser assaltada._`;
+
+      if (acao === "ver") {
+        await interaction.reply({ content: resumoBanco() });
+        console.log("✅ /banco (ver) respondido");
+        return;
+      }
+
+      const valor = acao === "depositar_tudo"
+        ? data.coins
+        : acao === "sacar_tudo"
+          ? data.banco
+          : quantidade;
+
+      if (!valor || valor <= 0) {
+        await interaction.reply({
+          content: "❌ Diz a quantidade que você quer mover (ou use *Depositar tudo* / *Sacar tudo*).",
+          ephemeral: true
+        });
+        return;
+      }
+
+      const depositando = acao === "depositar" || acao === "depositar_tudo";
+
+      if (depositando) {
+        if (data.coins < valor) {
+          await interaction.reply({
+            content: `❌ Você só tem ${formatarMoedas(data.coins)} na carteira.`,
+            ephemeral: true
+          });
+          return;
+        }
+        data.coins -= valor;
+        data.banco += valor;
+      } else {
+        if (data.banco < valor) {
+          await interaction.reply({
+            content: `❌ Você só tem ${formatarMoedas(data.banco)} no banco.`,
+            ephemeral: true
+          });
+          return;
+        }
+        data.banco -= valor;
+        data.coins += valor;
+      }
+
+      salvarDados();
+
+      await interaction.reply({
+        content: `✅ ${depositando ? "Depositaste" : "Sacaste"} ${formatarMoedas(valor)}.\n\n${resumoBanco()}`
+      });
+      console.log("✅ /banco respondido");
       return;
     }
 
@@ -3260,7 +3570,7 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      if (vitima.coins < 50) {
+      if (vitima.coins < ROUBO_MIN_VITIMA) {
         await interaction.reply({
           content: `❌ ${alvo.username} tá quebrado, não vale nem a pena tentar.`,
           ephemeral: true
@@ -3269,36 +3579,10 @@ client.on("interactionCreate", async interaction => {
       }
 
       ladrao.lastRoubar = now;
+      salvarDados(); // já garante o cooldown mesmo se o bot reiniciar no meio do minigame
 
-      const sucesso = Math.random() < 0.4; // 40% de chance de dar certo
-
-      if (sucesso) {
-        const percentual = Math.random() * 0.30 + 0.20; // 0.30 (diferença) + 0.20 (mínimo)
-        const roubado = Math.max(1, Math.floor(vitima.coins * percentual));
-
-        vitima.coins -= roubado;
-        ladrao.coins += roubado;
-
-        await verificarMarcosMoedas(interaction.guild, interaction.user.id, ladrao);
-        salvarDados();
-
-        await interaction.reply(
-          `🕵️ **Deu certo! Você roubou** ${formatarMoedas(roubado)} de ${alvo.username}.`
-        );
-      } else {
-        const multa = Math.floor(Math.random() * 221) + 80; // perde 80 a 300
-        ladrao.coins -= multa; // pode ficar negativo se não tiver o suficiente
-        ladrao.presoAte = now + PRISAO_MS;
-
-        salvarDados();
-
-        await interaction.reply(
-          `🚨 Foi pego tentando roubar ${alvo.username}! Pagou uma multa de ${formatarMoedas(multa)} e ficou ` +
-          `**PRESO por 15 minutos** — nada de trabalhar, pescar ou roubar nesse tempo.`
-        );
-      }
-
-      console.log("✅ /roubar respondido");
+      await iniciarRouboMinigame(interaction, alvo, ladrao, vitima);
+      console.log("✅ /roubar (minigame) respondido");
       return;
     }
 
