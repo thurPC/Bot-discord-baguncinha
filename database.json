@@ -17,7 +17,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "servidores": {
     "textXp": 0,
@@ -37,7 +38,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "configuracoes": {
     "textXp": 0,
@@ -57,7 +59,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1021571720718585997": {
     "textXp": 73,
@@ -77,7 +80,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1187249436892594177": {
     "textXp": 28,
@@ -99,7 +103,8 @@
       "veterano"
     ],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1108518941434843290": {
     "textXp": 50,
@@ -121,7 +126,8 @@
       "veterano"
     ],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1003450157137936444": {
     "textXp": 95,
@@ -143,7 +149,8 @@
       "veterano"
     ],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1244024680734658590": {
     "textXp": 94,
@@ -163,7 +170,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1476695863874289786": {
     "textXp": 42,
@@ -185,7 +193,8 @@
       "veterano"
     ],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "598310043968077854": {
     "textXp": 25,
@@ -205,7 +214,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1553892089538945087": {
     "textXp": 59,
@@ -225,7 +235,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1471478631942590701": {
     "textXp": 10,
@@ -245,7 +256,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1024343156407423087": {
     "textXp": 4,
@@ -265,7 +277,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "1399534199890903070": {
     "textXp": 0,
@@ -285,7 +298,8 @@
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
-    "milestonesAlcancados": []
+    "milestonesAlcancados": [],
+    "banco": 0
   },
   "__lojaImagens": {
     "cargo_pirata": "https://cdn.discordapp.com/attachments/1552387591704158378/1554508258365149185/Screenshot_20260929_115814_Discord.jpg?ex=6abd2422&is=6abbd2a2&hm=75baf3dccb38b7093ced6d93e65026c90cabb308cc6e583423cf4db94b23e7a8&"
