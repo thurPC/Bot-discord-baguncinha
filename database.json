@@ -45,7 +45,7 @@
   "1108518941434843290": {
     "textXp": 275,
     "textLevel": 3,
-    "voiceXp": 960,
+    "voiceXp": 982,
     "voiceLevel": 6,
     "lastMessageTimestamp": 1790818376886,
     "coins": 12611,
@@ -67,11 +67,11 @@
     ]
   },
   "1003450157137936444": {
-    "textXp": 56,
+    "textXp": 62,
     "textLevel": 2,
-    "voiceXp": 577,
+    "voiceXp": 593,
     "voiceLevel": 6,
-    "lastMessageTimestamp": 1790818137664,
+    "lastMessageTimestamp": 1790818899068,
     "coins": 810855,
     "lastDaily": 1790737908574,
     "lastTrabalhar": 1790810403667,
@@ -221,7 +221,7 @@
   "1024343156407423087": {
     "textXp": 4,
     "textLevel": 2,
-    "voiceXp": 182,
+    "voiceXp": 198,
     "voiceLevel": 1,
     "lastMessageTimestamp": 1790728754902,
     "coins": -1285,
