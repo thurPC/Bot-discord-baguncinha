@@ -43,11 +43,11 @@
     "milestonesAlcancados": []
   },
   "1108518941434843290": {
-    "textXp": 227,
+    "textXp": 241,
     "textLevel": 3,
     "voiceXp": 828,
     "voiceLevel": 6,
-    "lastMessageTimestamp": 1790814683986,
+    "lastMessageTimestamp": 1790816638108,
     "coins": 12881,
     "lastDaily": 1790732097425,
     "lastTrabalhar": 1790732105038,
@@ -67,12 +67,12 @@
     ]
   },
   "1003450157137936444": {
-    "textXp": 24,
+    "textXp": 34,
     "textLevel": 2,
-    "voiceXp": 416,
+    "voiceXp": 439,
     "voiceLevel": 6,
-    "lastMessageTimestamp": 1790816244410,
-    "coins": 25855,
+    "lastMessageTimestamp": 1790816428792,
+    "coins": 30855,
     "lastDaily": 1790737908574,
     "lastTrabalhar": 1790810403667,
     "lastPescar": 1790810399275,
