@@ -105,10 +105,29 @@ let githubSha = null;        // "versão" atual do arquivo no GitHub (necessári
 let dadosAlterados = false;  // true = tem coisa nova que ainda não foi pro GitHub
 let salvandoGithub = false;  // evita dois salvamentos ao mesmo tempo
 let ultimoTextoEnviado = null; // conteúdo do último envio (pra não commitar sem mudança)
+let economiaResetVersao = 0;   // versão do último reset de saldos aplicado (ver resetarEconomia)
 
-// Tudo que vai pro disco/GitHub: dados dos usuários + imagens da loja
+// Reset único da economia: zera os saldos que ficaram inflados pelo bug dos
+// marcos de moedas. Guardamos a versão aplicada junto dos dados pra rodar só uma
+// vez — suba esse número caso precise resetar de novo no futuro.
+const ECONOMIA_RESET_VERSAO = 1;
+
+function resetarEconomia() {
+  let afetados = 0;
+  for (const data of xpData.values()) {
+    if (data.coins !== 0 || (data.milestonesAlcancados && data.milestonesAlcancados.length > 0)) {
+      afetados++;
+    }
+    data.coins = 0;
+    data.milestonesAlcancados = [];
+  }
+  return afetados;
+}
+
+// Tudo que vai pro disco/GitHub: dados dos usuários + imagens da loja + a versão
+// do último reset de economia aplicado (pra rodar o reset uma única vez).
 function dadosParaSalvar() {
-  return { ...Object.fromEntries(xpData), __lojaImagens: lojaImagens };
+  return { ...Object.fromEntries(xpData), __lojaImagens: lojaImagens, __economiaReset: economiaResetVersao };
 }
 
 async function githubRequest(metodo, caminho, corpo) {
@@ -255,8 +274,24 @@ function aplicarDadosCarregados(objeto) {
       lojaImagens = valor || {};
       continue;
     }
-    xpData.set(chave, valor);
+    // chave especial: versão do reset de economia já aplicado
+    if (chave === "__economiaReset") {
+      economiaResetVersao = Number(valor) || 0;
+      continue;
+    }
+    xpData.set(chave, normalizarDadosUsuario(valor));
   }
+}
+
+// Roda o reset de economia só uma vez por versão. Precisa ser chamado depois de
+// carregar os dados (GitHub ou disco) e antes do bot começar a responder.
+function aplicarResetEconomiaSeNecessario() {
+  if (economiaResetVersao >= ECONOMIA_RESET_VERSAO) return;
+
+  const afetados = resetarEconomia();
+  economiaResetVersao = ECONOMIA_RESET_VERSAO;
+  salvarDados(); // já persiste o reset no disco e agenda o envio pro GitHub
+  console.log(`♻️ Reset de economia aplicado (v${ECONOMIA_RESET_VERSAO}) — ${afetados} carteira(s) zerada(s).`);
 }
 
 async function carregarDados() {
@@ -300,6 +335,37 @@ function salvarDados() {
   }
 }
 
+// Garante que TODO usuário (inclusive os antigos, carregados do GitHub/disco)
+// tenha todos os campos com tipo/valor válidos. Sem isso, contas criadas por
+// versões anteriores ficavam com `coins` indefinido, e qualquer ganho virava
+// NaN — que aparecia como "undefined" no /rankmoedas e estourava os totais.
+function normalizarDadosUsuario(data) {
+  if (!data || typeof data !== "object") data = {};
+  const numero = (valor, padrao = 0) =>
+    typeof valor === "number" && Number.isFinite(valor) ? valor : padrao;
+
+  data.textXp = numero(data.textXp);
+  data.textLevel = numero(data.textLevel, 1);
+  data.voiceXp = numero(data.voiceXp);
+  data.voiceLevel = numero(data.voiceLevel, 1);
+  data.lastMessageTimestamp = numero(data.lastMessageTimestamp);
+  data.coins = numero(data.coins);
+  data.lastDaily = numero(data.lastDaily);
+  data.lastTrabalhar = numero(data.lastTrabalhar);
+  data.lastPescar = numero(data.lastPescar);
+  data.lastRoubar = numero(data.lastRoubar);
+  data.lastRoleta = numero(data.lastRoleta);
+  data.presoAte = numero(data.presoAte);
+  data.turboTrabalhar = data.turboTrabalhar === true;
+  data.xpBoostAte = numero(data.xpBoostAte);
+  data.ticketsSorteio = numero(data.ticketsSorteio);
+  data.conquistas = Array.isArray(data.conquistas) ? data.conquistas : [];
+  data.itemLendario = data.itemLendario === true;
+  data.milestonesAlcancados = Array.isArray(data.milestonesAlcancados) ? data.milestonesAlcancados : [];
+
+  return data;
+}
+
 function getUserData(userId) {
   if (!xpData.has(userId)) {
     xpData.set(userId, {
@@ -324,18 +390,8 @@ function getUserData(userId) {
     });
   }
 
-  // Compatibilidade: quem já tinha conta antes dessa atualização não tem esses campos
-  const data = xpData.get(userId);
-  if (data.lastRoleta === undefined) data.lastRoleta = 0;
-  if (data.presoAte === undefined) data.presoAte = 0;
-  if (data.turboTrabalhar === undefined) data.turboTrabalhar = false;
-  if (data.xpBoostAte === undefined) data.xpBoostAte = 0;
-  if (data.ticketsSorteio === undefined) data.ticketsSorteio = 0;
-  if (data.conquistas === undefined) data.conquistas = [];
-  if (data.itemLendario === undefined) data.itemLendario = false;
-  if (data.milestonesAlcancados === undefined) data.milestonesAlcancados = [];
-
-  return data;
+  // Compatibilidade: normaliza contas antigas/incompletas e devolve o objeto.
+  return normalizarDadosUsuario(xpData.get(userId));
 }
 
 function xpForNextLevel(level, type) {
@@ -449,7 +505,9 @@ function getTrabalharCooldown(data) {
 }
 
 function formatarMoedas(valor) {
-  return `${valor} 🪙`;
+  const numero = Number(valor);
+  const exibicao = Number.isFinite(numero) ? Math.floor(numero).toLocaleString("pt-BR") : "0";
+  return `${exibicao} 🪙`;
 }
 
 // Bloqueia trabalhar/pescar/roubar enquanto a pessoa tá "presa" por ter falhado um roubo.
@@ -463,56 +521,59 @@ function checarPrisao(data) {
 }
 
 // =========================
-// MARCOS DE MOEDAS DO SERVIDOR
+// MARCOS DE MOEDAS
 // =========================
-// A cada 10.000 moedas acumuladas, o bot anuncia e dá uma recompensa — só uma vez
-// por marco por pessoa. Recompensa cresce 3.000 a cada marco: 10k->1k, 20k->4k, 30k->7k...
+// A cada 10.000 moedas acumuladas, o bot anuncia e dá uma recompensa fixa —
+// só uma vez por marco por pessoa.
+//
+// IMPORTANTE (correção): antes a recompensa crescia 3.000 por marco e podia
+// desbloquear o próximo marco dentro do mesmo cálculo. Isso se realimentava e
+// fazia a carteira explodir (ex.: quem tinha 690k ganhava ~200k de uma vez).
+// Agora a recompensa é CONSTANTE e NÃO conta pra desbloquear novos marcos, então
+// o dinheiro novo continua vindo das atividades/jogos, não dos marcos.
 const MOEDA_MARCO_INTERVALO = 10000;
+const MOEDA_MARCO_RECOMPENSA = 1000;
 
-function calcularRecompensaMarco(marco) {
-  const n = marco / MOEDA_MARCO_INTERVALO; // 1, 2, 3...
-  return 1000 + (n - 1) * 3000;
+function calcularRecompensaMarco(/* marco */) {
+  return MOEDA_MARCO_RECOMPENSA;
 }
 
 async function verificarMarcosMoedas(guild, userId, data) {
-  if (!guild) return;
-  if (!data.milestonesAlcancados) data.milestonesAlcancados = [];
+  if (!guild || !data) return;
+  if (!Array.isArray(data.milestonesAlcancados)) data.milestonesAlcancados = [];
+  if (typeof data.coins !== "number" || !Number.isFinite(data.coins)) data.coins = 0;
 
-  let seguranca = 0;
+  // Marcos são calculados pelo saldo ATUAL (antes da recompensa). A recompensa
+  // não empurra pra novos marcos — evita a bola de neve que inflacionava tudo.
+  const marcoMaximoAtingido = Math.floor(data.coins / MOEDA_MARCO_INTERVALO) * MOEDA_MARCO_INTERVALO;
+  if (marcoMaximoAtingido < MOEDA_MARCO_INTERVALO) return;
 
-  // Loop porque a própria recompensa pode empurrar a pessoa pro próximo marco também
-  while (seguranca < 20) {
-    seguranca++;
+  const novosMarcos = [];
+  for (let m = MOEDA_MARCO_INTERVALO; m <= marcoMaximoAtingido; m += MOEDA_MARCO_INTERVALO) {
+    if (!data.milestonesAlcancados.includes(m)) novosMarcos.push(m);
+  }
 
-    const marcoMaximoAtingido = Math.floor(data.coins / MOEDA_MARCO_INTERVALO) * MOEDA_MARCO_INTERVALO;
-    if (marcoMaximoAtingido <= 0) break;
+  if (novosMarcos.length === 0) return;
 
-    let proximoMarco = null;
-    for (let m = MOEDA_MARCO_INTERVALO; m <= marcoMaximoAtingido; m += MOEDA_MARCO_INTERVALO) {
-      if (!data.milestonesAlcancados.includes(m)) {
-        proximoMarco = m;
-        break;
-      }
-    }
+  let recompensaTotal = 0;
+  for (const marco of novosMarcos) {
+    data.milestonesAlcancados.push(marco);
+    recompensaTotal += calcularRecompensaMarco(marco);
+  }
+  data.coins += recompensaTotal;
 
-    if (proximoMarco === null) break;
+  const ultimoMarco = novosMarcos[novosMarcos.length - 1];
+  const canal = guild.systemChannel;
+  if (canal) {
+    const embed = new EmbedBuilder()
+      .setTitle("💰 Novo marco de moedas!")
+      .setDescription(
+        `<@${userId}> chegou em **${ultimoMarco.toLocaleString("pt-BR")} moedas** no servidor! 🎉\n` +
+        `Recompensa por bater essa meta: ${formatarMoedas(recompensaTotal)}`
+      )
+      .setColor(0xf1c40f);
 
-    data.milestonesAlcancados.push(proximoMarco);
-    const recompensa = calcularRecompensaMarco(proximoMarco);
-    data.coins += recompensa;
-
-    const canal = guild.systemChannel;
-    if (canal) {
-      const embed = new EmbedBuilder()
-        .setTitle("💰 Novo marco de moedas!")
-        .setDescription(
-          `<@${userId}> chegou em **${proximoMarco.toLocaleString("pt-BR")} moedas** no servidor! 🎉\n` +
-          `Recompensa por bater essa meta: ${formatarMoedas(recompensa)}`
-        )
-        .setColor(0xf1c40f);
-
-      canal.send({ embeds: [embed] }).catch(() => {});
-    }
+    canal.send({ embeds: [embed] }).catch(() => {});
   }
 }
 
@@ -2962,6 +3023,7 @@ client.on("interactionCreate", async interaction => {
     // =========================
     if (interaction.commandName === "rankmoedas") {
       const ranking = [...xpData.entries()]
+        .map(([userId, dados]) => [userId, normalizarDadosUsuario(dados)])
         .sort((a, b) => b[1].coins - a[1].coins)
         .slice(0, 10);
 
@@ -3848,6 +3910,9 @@ async function start() {
     }
 
     await carregarDados();
+
+    // Zera os saldos inflados uma única vez (ver ECONOMIA_RESET_VERSAO)
+    aplicarResetEconomiaSeNecessario();
 
     await registerCommands();
 
