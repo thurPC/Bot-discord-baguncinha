@@ -440,7 +440,7 @@ const ROUBAR_COOLDOWN_MS = 20 * 60 * 1000;
 const PRISAO_MS = 15 * 60 * 1000; // tempo preso ao falhar um roubo
 const ROLETA_COOLDOWN_MS = 1 * 60 * 1000;
 const ROLETA_APOSTA_MIN = 100;
-const ROLETA_APOSTA_MAX = 5000;
+const ROLETA_APOSTA_MAX = 20000;
 const PPT_APOSTA_MIN = 50;
 const PPT_APOSTA_MAX = 5000;
 
