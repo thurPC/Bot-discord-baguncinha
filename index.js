@@ -1412,7 +1412,7 @@ async function iniciarRouboMinigame(interaction, alvo, ladrao, vitima) {
       .setDescription(
         `Repita na **mesma ordem**! Cliques: 0/${tamanho}\n⏱️ ${Math.round(jogarMs / 1000)}s`
       );
-    await mensagem.edit({ content: "", embeds: [embed], components }).catch(() => {});
+    await mensagem.edit({ content: "", embeds: [embed], components: componentes }).catch(() => {});
 
     // 3) coleta os cliques e valida na ordem
     let posicao = 0;
