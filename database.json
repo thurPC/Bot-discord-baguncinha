@@ -109,7 +109,7 @@
   "1108518941434843290": {
     "textXp": 186,
     "textLevel": 4,
-    "voiceXp": 595,
+    "voiceXp": 615,
     "voiceLevel": 8,
     "lastMessageTimestamp": 1790979883311,
     "coins": 488,
@@ -135,7 +135,7 @@
     "voiceXp": 826,
     "voiceLevel": 7,
     "lastMessageTimestamp": 1790919223921,
-    "coins": 409,
+    "coins": 759,
     "lastDaily": 1790737908574,
     "lastTrabalhar": 1790825808866,
     "lastPescar": 1790907938518,
@@ -162,16 +162,16 @@
     "lastDaily": 1790974857226,
     "lastTrabalhar": 1790974846199,
     "lastPescar": 1790974852278,
-    "lastRoubar": 1790978456668,
+    "lastRoubar": 1790980089479,
     "lastRoleta": 1790820812267,
-    "presoAte": 1790979374031,
+    "presoAte": 1790981023896,
     "turboTrabalhar": false,
     "xpBoostAte": 1790825798653,
     "ticketsSorteio": 0,
     "conquistas": [],
     "itemLendario": false,
     "milestonesAlcancados": [],
-    "banco": 945
+    "banco": 595
   },
   "1476695863874289786": {
     "textXp": 42,
