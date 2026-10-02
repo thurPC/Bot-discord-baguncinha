@@ -106,9 +106,17 @@ let dadosAlterados = false;  // true = tem coisa nova que ainda não foi pro Git
 let salvandoGithub = false;  // evita dois salvamentos ao mesmo tempo
 let ultimoTextoEnviado = null; // conteúdo do último envio (pra não commitar sem mudança)
 
-// Tudo que vai pro disco/GitHub: dados dos usuários + imagens da loja
+// Configurações gerais do bot que precisam sobreviver a reinícios/deploys.
+// Guardamos o ID (não o nome) dos canais: assim renomear o canal no Discord
+// não faz o bot perder a referência dele.
+const botConfig = {
+  futebolChannelId: null,
+  futebolChannelName: null
+};
+
+// Tudo que vai pro disco/GitHub: dados dos usuários + imagens da loja + config
 function dadosParaSalvar() {
-  return { ...Object.fromEntries(xpData), __lojaImagens: lojaImagens };
+  return { ...Object.fromEntries(xpData), __lojaImagens: lojaImagens, __config: botConfig };
 }
 
 async function githubRequest(metodo, caminho, corpo) {
@@ -253,6 +261,11 @@ function aplicarDadosCarregados(objeto) {
     // chave especial: imagens da loja (não é um usuário)
     if (chave === "__lojaImagens") {
       lojaImagens = valor || {};
+      continue;
+    }
+    // chave especial: config geral do bot (não é um usuário)
+    if (chave === "__config") {
+      Object.assign(botConfig, valor || {});
       continue;
     }
     xpData.set(chave, valor);
@@ -1709,15 +1722,50 @@ async function acharCanalPorNome(guild, nomesAlvo) {
   return candidatos[0];
 }
 
+const FUTEBOL_TOPIC = "Avisos automáticos do Brasileirão, Libertadores e da Seleção Brasileira";
+
+// O canal de futebol pode ser renomeado pelo usuário. Como guardamos o ID dele
+// (não o nome), o bot continua reconhecendo o mesmo canal depois da renomeação.
+function ehCanalDeFutebol(canal) {
+  if (!canal) return false;
+  if (canal.type !== ChannelType.GuildText && canal.type !== ChannelType.GuildAnnouncement) return false;
+  return typeof canal.topic === "string" && canal.topic.includes("Avisos automáticos");
+}
+
 async function ensureFutebolChannel(guild) {
+  if (!guild) return null;
+
+  // 1) Se já sabemos o ID do canal, usa ele — mesmo que tenha sido renomeado.
+  if (botConfig.futebolChannelId) {
+    const salvo = await guild.channels.fetch(botConfig.futebolChannelId).catch(() => null);
+    if (salvo && (salvo.type === ChannelType.GuildText || salvo.type === ChannelType.GuildAnnouncement)) {
+      if (botConfig.futebolChannelName !== salvo.name) {
+        botConfig.futebolChannelName = salvo.name;
+        salvarDados();
+      }
+      console.log(`⚽ Canal de futebol reconhecido: #${salvo.name} (ID salvo).`);
+      return salvo;
+    }
+    // O canal salvo sumiu: esquece o ID antigo e procura/cria de novo.
+    console.log("⚠️ O canal de futebol salvo não existe mais — vou procurar/criar novamente.");
+    botConfig.futebolChannelId = null;
+  }
+
+  // 2) Procura pelo nome (futebol/football) ou pelo tema que o bot define no canal.
   let channel = await acharCanalPorNome(guild, ["futebol", "football"]);
 
+  if (!channel) {
+    await guild.channels.fetch().catch(() => {});
+    channel = [...guild.channels.cache.values()].find(ehCanalDeFutebol) || null;
+  }
+
+  // 3) Não achou: cria um novo.
   if (!channel) {
     try {
       channel = await guild.channels.create({
         name: "futebol",
         type: ChannelType.GuildText,
-        topic: "Avisos automáticos do Brasileirão, Libertadores e da Seleção Brasileira"
+        topic: FUTEBOL_TOPIC
       });
       console.log("✅ Canal #futebol criado.");
     } catch (error) {
@@ -1727,6 +1775,10 @@ async function ensureFutebolChannel(guild) {
     }
   }
 
+  // Guarda o ID/nome pra reconhecer o canal mesmo depois de renomeado/reiniciado.
+  botConfig.futebolChannelId = channel.id;
+  botConfig.futebolChannelName = channel.name;
+  salvarDados();
   return channel;
 }
 
