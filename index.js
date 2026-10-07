@@ -604,9 +604,9 @@ function addXp(userId, amount, type) {
 // O cargo do bot precisa estar ACIMA desses cargos na hierarquia,
 // e o bot precisa da permissão "Gerenciar Cargos".
 const LEVEL_ROLES = {
-  7: "1546574924448141484",   // ex: Membro Ativo
-  15: "1552496174882234479",  // ex: Veterano
-  25: "1552497344270958674"   // ex: Lenda do Servidor
+  4: "1546574924448141484",   // ex: Membro Ativo
+  10: "1552496174882234479",  // ex: Veterano
+  20: "1552497344270958674"   // ex: Lenda do Servidor
 };
 
 function getRoleIdForLevel(level) {
@@ -664,12 +664,12 @@ let top1RoleId = process.env.TOP1_ROLE_ID || null;
 const TRABALHAR_COOLDOWN_NORMAL_MS = 60 * 60 * 1000;
 const TRABALHAR_COOLDOWN_TURBO_MS = 25 * 60 * 1000; // com o item "Turbo Trabalhar" da loja
 const PESCAR_COOLDOWN_MS = 8 * 60 * 1000;
-const ROUBAR_COOLDOWN_MS = 10 * 1000;
-const PRISAO_MS = 15 * 60 * 1000; // tempo preso ao falhar um roubo
-const ROLETA_COOLDOWN_MS = 1 * 60 * 1000;
-const ROLETA_APOSTA_MIN = 100;
+const ROUBAR_COOLDOWN_MS = 20 * 1000;
+const PRISAO_MS = 35 * 60 * 1000; // tempo preso ao falhar um roubo
+const ROLETA_COOLDOWN_MS = 60 * 1000;
+const ROLETA_APOSTA_MIN = 150;
 const ROLETA_APOSTA_MAX = 20000;
-const PPT_APOSTA_MIN = 50;
+const PPT_APOSTA_MIN = 100;
 const PPT_APOSTA_MAX = 5000;
 
 // --- Banco / Roubo ---
@@ -687,7 +687,7 @@ const ROUBO_SIMBOLOS = ["🍎", "🍌", "🍇", "🍒", "🍉", "🍋"];
 const ROUBO_RODADAS = [
   { tamanho: 4, mostrarMs: 3500, jogarMs: 12000 },
   { tamanho: 5, mostrarMs: 3500, jogarMs: 12000 },
-  { tamanho: 6, mostrarMs: 4500, jogarMs: 15000 }
+  { tamanho: 6, mostrarMs: 5500, jogarMs: 15000 }
 ];
 
 function getTotalMoedas(data) {
