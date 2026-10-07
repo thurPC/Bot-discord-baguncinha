@@ -106,6 +106,7 @@ let dadosAlterados = false;  // true = tem coisa nova que ainda não foi pro Git
 let salvandoGithub = false;  // evita dois salvamentos ao mesmo tempo
 let ultimoTextoEnviado = null; // conteúdo do último envio (pra não commitar sem mudança)
 let economiaResetVersao = 0;   // versão do último reset de saldos aplicado (ver resetarEconomia)
+let top1Estado = { userId: null, since: 0, roleGranted: false };
 
 // Reset único da economia: zera os saldos que ficaram inflados pelo bug dos
 // marcos de moedas. Guardamos a versão aplicada junto dos dados pra rodar só uma
@@ -128,7 +129,12 @@ function resetarEconomia() {
 // Tudo que vai pro disco/GitHub: dados dos usuários + imagens da loja + a versão
 // do último reset de economia aplicado (pra rodar o reset uma única vez).
 function dadosParaSalvar() {
-  return { ...Object.fromEntries(xpData), __lojaImagens: lojaImagens, __economiaReset: economiaResetVersao };
+  return {
+    ...Object.fromEntries(xpData),
+    __lojaImagens: lojaImagens,
+    __economiaReset: economiaResetVersao,
+    __top1: top1Estado
+  };
 }
 
 async function githubRequest(metodo, caminho, corpo) {
@@ -280,6 +286,14 @@ function aplicarDadosCarregados(objeto) {
       economiaResetVersao = Number(valor) || 0;
       continue;
     }
+    if (chave === "__top1") {
+      top1Estado = {
+        userId: valor?.userId || null,
+        since: Number(valor?.since) || 0,
+        roleGranted: valor?.roleGranted === true
+      };
+      continue;
+    }
     xpData.set(chave, normalizarDadosUsuario(valor));
   }
 }
@@ -409,6 +423,156 @@ function getTotalLevel(data) {
   return Math.max(data.textLevel, data.voiceLevel);
 }
 
+function obterRankingXp(limite = 10) {
+  return [...xpData.entries()]
+    .filter(([userId]) => userId && !String(userId).startsWith("__"))
+    .sort((a, b) => {
+      const totalA = getTotalLevel(a[1]);
+      const totalB = getTotalLevel(b[1]);
+      if (totalB !== totalA) return totalB - totalA;
+      return (b[1].textXp + b[1].voiceXp) - (a[1].textXp + a[1].voiceXp);
+    })
+    .slice(0, limite);
+}
+
+async function montarEmbedRanking(limite = 10) {
+  const ranking = obterRankingXp(limite);
+
+  if (ranking.length === 0) {
+    return new EmbedBuilder()
+      .setTitle("Ranking")
+      .setDescription("Ainda nao rolou nada por aqui. Manda umas mensagens ou entra em call!")
+      .setColor(0xfee75c);
+  }
+
+  const MEDALHAS = ["🥇", "🥈", "🥉"];
+  const usuarios = await Promise.all(
+    ranking.map(([userId]) => client.users.fetch(userId).catch(() => null))
+  );
+
+  const linhas = ranking.map(([, data], index) => {
+    const user = usuarios[index];
+    const nome = user ? user.username : "Usuário desconhecido";
+    const posicao = MEDALHAS[index] || `**${index + 1}.**`;
+    return (
+      `${posicao} **${nome}** — Nível ${getTotalLevel(data)}\n` +
+      `　　💬 Texto: ${data.textLevel}  •  🎙️ Voz: ${data.voiceLevel}`
+    );
+  });
+
+  return new EmbedBuilder()
+    .setTitle("🏆 **Ranking**")
+    .setDescription(linhas.join("\n\n"))
+    .setColor(0xfee75c)
+    .setThumbnail(usuarios[0]?.displayAvatarURL({ size: 256 }) || null)
+    .setFooter({ text: `Top ${ranking.length} de atividade no servidor` });
+}
+
+async function ensureTop1Role(guild) {
+  if (!guild) return null;
+  await guild.roles.fetch().catch(() => {});
+
+  if (top1RoleId && guild.roles.cache.has(top1RoleId)) {
+    return guild.roles.cache.get(top1RoleId);
+  }
+
+  let cargo = guild.roles.cache.find(r => r.name.toLowerCase() === TOP1_ROLE_NAME.toLowerCase());
+  if (!cargo) {
+    try {
+      cargo = await guild.roles.create({
+        name: TOP1_ROLE_NAME,
+        color: 0xffd700,
+        hoist: true,
+        mentionable: false,
+        reason: "Cargo automatico para quem fica no 1 lugar do ranking por 3 dias"
+      });
+      console.log(`Cargo Top 1 criado: ${cargo.id}`);
+    } catch (error) {
+      console.error("Nao consegui criar o cargo Top 1:", error.message);
+      return null;
+    }
+  }
+
+  top1RoleId = cargo.id;
+  return cargo;
+}
+
+let atualizandoTop1 = false;
+
+async function atualizarTop1(guild) {
+  if (!guild || atualizandoTop1) return;
+  atualizandoTop1 = true;
+  try {
+    const ranking = obterRankingXp(1);
+    const liderId = ranking[0]?.[0] || null;
+    const agora = Date.now();
+    const cargo = await ensureTop1Role(guild);
+
+    if (!liderId) return;
+
+    if (top1Estado.userId !== liderId) {
+      const antigoId = top1Estado.userId;
+      const tinhaCargo = top1Estado.roleGranted;
+
+      if (antigoId && cargo) {
+        const antigo = await guild.members.fetch(antigoId).catch(() => null);
+        if (antigo && antigo.roles.cache.has(cargo.id)) {
+          await antigo.roles.remove(cargo).catch(() => {});
+        }
+
+        if (tinhaCargo) {
+          const canal = guild.systemChannel;
+          if (canal) {
+            await canal.send(
+              `<@${antigoId}> perdeu o cargo **${TOP1_ROLE_NAME}**! <@${liderId}> assumiu o 1 lugar do ranking.`
+            ).catch(() => {});
+          }
+
+          const dmAntigo = await client.users.fetch(antigoId).catch(() => null);
+          if (dmAntigo) {
+            await dmAntigo.send(
+              `Voce perdeu o cargo **${TOP1_ROLE_NAME}** no servidor **${guild.name}**. Alguem tomou o 1 lugar do ranking.`
+            ).catch(() => {});
+          }
+        }
+      }
+
+      top1Estado = { userId: liderId, since: agora, roleGranted: false };
+      salvarDados();
+      return;
+    }
+
+    if (!top1Estado.since) {
+      top1Estado.since = agora;
+      salvarDados();
+      return;
+    }
+
+    if (!top1Estado.roleGranted && agora - top1Estado.since >= TOP1_DIAS_MS) {
+      const recompensaTop1 = 2000;
+      const dataLider = getUserData(liderId);
+      dataLider.coins += recompensaTop1;
+
+      if (cargo) {
+        const membro = await guild.members.fetch(liderId).catch(() => null);
+        if (membro && !membro.roles.cache.has(cargo.id)) {
+          await membro.roles.add(cargo).catch(() => {});
+        }
+        const canal = guild.systemChannel;
+        if (canal) {
+          await canal.send(
+            `<@${liderId}> ficou em **1 lugar** por mais de 3 dias e ganhou o cargo **${TOP1_ROLE_NAME}** + ${formatarMoedas(recompensaTop1)}!`
+          ).catch(() => {});
+        }
+      }
+      top1Estado.roleGranted = true;
+      salvarDados();
+    }
+  } finally {
+    atualizandoTop1 = false;
+  }
+}
+
 // type: "text" ou "voice" — cada um tem seu próprio XP/nível
 function addXp(userId, amount, type) {
   const data = getUserData(userId);
@@ -492,6 +656,11 @@ async function updateLevelRole(guild, userId, level) {
 // ECONOMIA — MOEDAS
 // =========================
 const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DAILY_MIN = 250;
+const DAILY_MAX = 500;
+const TOP1_DIAS_MS = 3 * 24 * 60 * 60 * 1000;
+const TOP1_ROLE_NAME = "Top 1";
+let top1RoleId = process.env.TOP1_ROLE_ID || null;
 const TRABALHAR_COOLDOWN_NORMAL_MS = 60 * 60 * 1000;
 const TRABALHAR_COOLDOWN_TURBO_MS = 25 * 60 * 1000; // com o item "Turbo Trabalhar" da loja
 const PESCAR_COOLDOWN_MS = 8 * 60 * 1000;
@@ -1600,7 +1769,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("daily")
-    .setDescription("Resgata sua recompensa diária de moedas."),
+    .setDescription("Resgata sua recompensa diária (250 a 500 moedas)."),
 
   new SlashCommandBuilder()
     .setName("trabalhar")
@@ -2102,27 +2271,31 @@ client.once("ready", async () => {
   setInterval(tickVoiceXp, VOICE_XP_INTERVAL_MS);
   console.log(`🎙️ Rastreamento de XP por voz ativado (a cada ${VOICE_XP_INTERVAL_MS / 60000} min)`);
 
-  // A verificação é configurada ANTES do futebol de propósito: as chamadas da
-  // TheSportsDB podem demorar. Se a verificação fosse configurada só depois,
-  // qualquer reação que chegasse nesse meio-tempo seria ignorada.
   const guildVerificacao = client.guilds.cache.get(GUILD_ID);
   if (guildVerificacao && !NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_")) {
     await ensureInterestRoles(guildVerificacao);
+    await ensureTop1Role(guildVerificacao);
+    await atualizarTop1(guildVerificacao);
     const canalVerificacao = await ensureVerificacaoChannel(guildVerificacao);
     if (canalVerificacao) {
       const mensagem = await ensureVerificacaoMessage(canalVerificacao);
       if (mensagem) {
         verificacaoMessageId = mensagem.id;
-        console.log(`🔒 Sistema de verificação ativo (mensagem ${verificacaoMessageId}).`);
+        console.log(`Sistema de verificacao ativo (mensagem ${verificacaoMessageId}).`);
       } else {
-        console.log("⚠️ Verificação NÃO ativa: não consegui criar/achar a mensagem de verificação.");
+        console.log("Verificacao NAO ativa: nao consegui criar/achar a mensagem de verificacao.");
       }
     } else {
-      console.log("⚠️ Verificação NÃO ativa: não consegui criar/achar o canal #verificacao.");
+      console.log("Verificacao NAO ativa: nao consegui criar/achar o canal #verificacao.");
     }
   } else {
-    console.log("⚠️ NAO_VERIFICADO_ROLE_ID não configurado — verificação desativada.");
+    console.log("NAO_VERIFICADO_ROLE_ID nao configurado — verificacao desativada.");
   }
+
+  setInterval(() => {
+    const guild = client.guilds.cache.get(GUILD_ID);
+    if (guild) atualizarTop1(guild).catch(() => {});
+  }, 60 * 60 * 1000);
 
   const guildFutebol = client.guilds.cache.get(GUILD_ID);
   if (guildFutebol) {
@@ -2140,59 +2313,62 @@ client.once("ready", async () => {
 });
 
 // =========================
-// VERIFICAÇÃO POR REAÇÃO — PORTÃO DE ENTRADA
+// VERIFICACAO POR BOTOES — PORTAO DE ENTRADA
 // =========================
-// Novo membro ganha o cargo "Não Verificado" e só enxerga o canal de verificação
-// (isso você configura nas permissões dos canais).
-// Quando reage na mensagem fixa com os emojis, ganha o(s) cargo(s) de interesse
-// e perde o "Não Verificado", liberando o resto do servidor.
+// Novo membro ganha o cargo "Nao Verificado" e so enxerga o canal de verificacao.
+// Quando clica num botao de interesse, ganha o cargo e perde o "Nao Verificado".
 const NAO_VERIFICADO_ROLE_ID = "1552496115566252082";
 
-// A chave usada aqui precisa ser IDÊNTICA à chave em INTEREST_ROLES lá embaixo.
-const INTEREST_EMOJIS = {
-  "🎯": "valorant",
-  "⛏️": "minecraft",
-  "🔫": "cs",
-  "🧱": "roblox",
-  "🪂": "fortnite",
-  "⚽": "futebol",
-  "💎": "nitros",
-  "🏷️": "promocao",
-  "💬": "geral"
-};
+const INTEREST_BOTOES = [
+  { id: "valorant", label: "Valorant", emoji: "🎯" },
+  { id: "minecraft", label: "Minecraft", emoji: "⛏️" },
+  { id: "cs", label: "CS", emoji: "🔫" },
+  { id: "roblox", label: "Roblox", emoji: "🧱" },
+  { id: "fortnite", label: "Fortnite", emoji: "🪂" },
+  { id: "futebol", label: "Futebol", emoji: "⚽" },
+  { id: "nitros", label: "Nitros", emoji: "💎" },
+  { id: "promocao", label: "Promocoes", emoji: "🏷️" },
+  { id: "geral", label: "Geral", emoji: "💬" }
+];
 
 const VERIFICACAO_MARCADOR = "verificacao-baguncinha";
+const VERIFICACAO_BTN_PREFIX = "verificacao:";
 let verificacaoMessageId = null;
 
 function montarEmbedVerificacao() {
-  const lista = Object.entries(INTEREST_EMOJIS)
-    .map(([emoji, interesse]) => `${emoji} — ${(NOMES_INTERESSES[interesse] || interesse).replace(/^[^\p{L}\p{N}]+/u, "").trim()}`)
+  const lista = INTEREST_BOTOES
+    .map(b => `• ${(NOMES_INTERESSES[b.id] || b.label).replace(/^[^\p{L}\p{N}]+/u, "").trim()}`)
     .join("\n");
 
   return new EmbedBuilder()
-    .setTitle("🔒 Verificação de acesso")
+    .setTitle("Verificacao de acesso")
     .setDescription(
-      "Bem-vindo(a) à Baguncinha! Pra liberar o acesso ao resto do servidor, reage aqui embaixo " +
-      "com o que você curte:\n\n" +
+      "Bem-vindo(a) a Baguncinha! Pra liberar o acesso ao resto do servidor, clica no botao " +
+      "do que voce curte:\n\n" +
       `${lista}\n\n` +
-      "Assim que reagir com pelo menos um, seu acesso já é liberado na hora."
+      "Assim que clicar em pelo menos um, seu acesso ja e liberado na hora."
     )
     .setColor(0x5865f2)
     .setFooter({ text: VERIFICACAO_MARCADOR });
 }
 
-// O Discord às vezes devolve o nome do emoji da reação SEM o "variation selector"
-// (o caractere invisível U+FE0F que alguns emojis, tipo ⛏️, carregam). Se a chave em
-// INTEREST_EMOJIS tiver o U+FE0F e a reação vier sem ele (ou vice-versa), o lookup
-// direto falha e a verificação simplesmente não faz nada pra aquele emoji.
-// normalizarEmoji() remove esse caractere dos dois lados antes de comparar.
-function normalizarEmoji(nome) {
-  return nome ? nome.replace(/\uFE0F/g, "") : nome;
+function montarBotoesVerificacao() {
+  const rows = [];
+  for (let i = 0; i < INTEREST_BOTOES.length; i += 5) {
+    const chunk = INTEREST_BOTOES.slice(i, i + 5);
+    const row = new ActionRowBuilder();
+    for (const botao of chunk) {
+      const b = new ButtonBuilder()
+        .setCustomId(`${VERIFICACAO_BTN_PREFIX}${botao.id}`)
+        .setLabel(botao.label)
+        .setStyle(ButtonStyle.Primary);
+      if (botao.emoji) b.setEmoji(botao.emoji);
+      row.addComponents(b);
+    }
+    rows.push(row);
+  }
+  return rows;
 }
-
-const INTEREST_EMOJIS_NORMALIZADO = Object.fromEntries(
-  Object.entries(INTEREST_EMOJIS).map(([emoji, interesse]) => [normalizarEmoji(emoji), interesse])
-);
 
 function ehMensagemVerificacao(mensagem) {
   if (!client.user || mensagem.author?.id !== client.user.id) return false;
@@ -2211,7 +2387,7 @@ async function ensureVerificacaoChannel(guild) {
       channel = await guild.channels.create({
         name: "verificacao",
         type: ChannelType.GuildText,
-        topic: "🔒 Reaja aqui pra liberar seu acesso ao servidor"
+        topic: "Clique nos botoes pra liberar seu acesso ao servidor"
       });
       console.log("✅ Canal #verificacao criado.");
     } catch (error) {
@@ -2232,24 +2408,16 @@ async function ensureVerificacaoMessage(channel) {
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
     const embed = montarEmbedVerificacao();
+    const components = montarBotoesVerificacao();
     const existente = existentes[0];
 
     if (existente) {
-      await existente.edit({ embeds: [embed] }).catch(() => {});
-      for (const emoji of Object.keys(INTEREST_EMOJIS)) {
-        const jaTem = existente.reactions.cache.some(
-          r => normalizarEmoji(r.emoji.name) === normalizarEmoji(emoji)
-        );
-        if (!jaTem) await existente.react(emoji).catch(() => {});
-      }
+      await existente.edit({ embeds: [embed], components }).catch(() => {});
+      await existente.reactions.removeAll().catch(() => {});
       return existente;
     }
 
-    const mensagem = await channel.send({ embeds: [embed] });
-    for (const emoji of Object.keys(INTEREST_EMOJIS)) {
-      await mensagem.react(emoji);
-    }
-
+    const mensagem = await channel.send({ embeds: [embed], components });
     return mensagem;
   } catch (error) {
     console.error("❌ Erro ao preparar mensagem de verificação:", error);
@@ -2269,68 +2437,55 @@ client.on("guildMemberAdd", async member => {
   }
 });
 
-client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot) return;
-  if (reaction.message.id !== verificacaoMessageId) return;
+async function handleVerificacaoBotao(interaction) {
+  const interesse = interaction.customId.slice(VERIFICACAO_BTN_PREFIX.length);
+  const valido = INTEREST_BOTOES.some(b => b.id === interesse);
+  if (!valido) {
+    await interaction.reply({ content: "Esse botao nao e valido.", ephemeral: true }).catch(() => {});
+    return;
+  }
 
-  if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch {
-      return;
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  if (!member) {
+    await interaction.reply({ content: "Nao consegui te achar no servidor.", ephemeral: true }).catch(() => {});
+    return;
+  }
+
+  const roleId = INTEREST_ROLES[interesse];
+  let ganhouCargo = false;
+  let jaTinhaCargo = false;
+
+  if (roleId && !String(roleId).startsWith("COLOQUE_")) {
+    jaTinhaCargo = member.roles.cache.has(roleId);
+    if (!jaTinhaCargo) {
+      await member.roles.add(roleId).catch(() => {});
+      ganhouCargo = true;
+    } else {
+      await member.roles.remove(roleId).catch(() => {});
     }
   }
 
-  const interesse = INTEREST_EMOJIS_NORMALIZADO[normalizarEmoji(reaction.emoji.name)];
-  if (!interesse) return;
-
-  const guild = reaction.message.guild;
-  const member = await guild.members.fetch(user.id).catch(error => {
-    console.error("❌ Erro ao buscar membro pra verificação (confere se o 'Server Members Intent' tá ligado no Discord Developer Portal):", error.message);
-    return null;
-  });
-  if (!member) return;
-
-  const roleId = INTEREST_ROLES[interesse];
-  if (roleId && !roleId.startsWith("COLOQUE_")) {
-    await member.roles.add(roleId).catch(() => {});
-  }
-
+  let acabouDeVerificar = false;
   if (!NAO_VERIFICADO_ROLE_ID.startsWith("COLOQUE_") && member.roles.cache.has(NAO_VERIFICADO_ROLE_ID)) {
     await member.roles.remove(NAO_VERIFICADO_ROLE_ID).catch(() => {});
-    member.send("✅ Verificado! Já pode acessar o resto do servidor. Bem-vindo(a)!").catch(() => {});
-    console.log(`✅ ${user.tag} verificado.`);
-  }
-});
-
-client.on("messageReactionRemove", async (reaction, user) => {
-  if (user.bot) return;
-  if (reaction.message.id !== verificacaoMessageId) return;
-
-  if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch {
-      return;
-    }
+    acabouDeVerificar = true;
+    console.log(`${interaction.user.tag} verificado.`);
   }
 
-  const interesse = INTEREST_EMOJIS_NORMALIZADO[normalizarEmoji(reaction.emoji.name)];
-  if (!interesse) return;
-
-  const guild = reaction.message.guild;
-  const member = await guild.members.fetch(user.id).catch(error => {
-    console.error("❌ Erro ao buscar membro pra verificação (confere se o 'Server Members Intent' tá ligado no Discord Developer Portal):", error.message);
-    return null;
-  });
-  if (!member) return;
-
-  // Tira só o cargo de interesse — não bloqueia de novo o acesso já liberado
-  const roleId = INTEREST_ROLES[interesse];
-  if (roleId && !roleId.startsWith("COLOQUE_")) {
-    await member.roles.remove(roleId).catch(() => {});
+  const nomeInteresse = (NOMES_INTERESSES[interesse] || interesse).replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  let texto;
+  if (acabouDeVerificar) {
+    texto = `Verificado! Acesso liberado. Cargo **${nomeInteresse}** adicionado.`;
+  } else if (ganhouCargo) {
+    texto = `Cargo **${nomeInteresse}** adicionado.`;
+  } else if (jaTinhaCargo) {
+    texto = `Cargo **${nomeInteresse}** removido.`;
+  } else {
+    texto = `Verificado! Acesso liberado.`;
   }
-});
+
+  await interaction.reply({ content: texto, ephemeral: true }).catch(() => {});
+}
 
 // =========================
 // GANHO DE XP POR MENSAGEM
@@ -3015,6 +3170,11 @@ client.on("interactionCreate", async interaction => {
     return;
   }
 
+  if (interaction.customId && interaction.customId.startsWith(VERIFICACAO_BTN_PREFIX)) {
+    await handleVerificacaoBotao(interaction);
+    return;
+  }
+
   if (interaction.isMessageContextMenuCommand() && interaction.commandName === "Editar embed") {
     try {
       await handleEditarEmbedContext(interaction);
@@ -3033,7 +3193,43 @@ client.on("interactionCreate", async interaction => {
 
   console.log(`📥 Comando recebido: /${interaction.commandName}`);
 
+  const replyOriginal = interaction.reply.bind(interaction);
+  const editOriginal = interaction.editReply.bind(interaction);
+  const deferOriginal = interaction.deferReply.bind(interaction);
+  let rankingAnexado = false;
+  let skipRanking = false;
+
+  interaction.deferReply = async options => {
+    if (options && options.ephemeral) skipRanking = true;
+    return deferOriginal(options);
+  };
+
+  const payloadComRanking = async options => {
+    if (interaction.commandName === "rank" || rankingAnexado || skipRanking) return options;
+    const ephemeral = typeof options === "object" && options !== null && options.ephemeral;
+    if (ephemeral) return options;
+
+    try {
+      const rankEmbed = await montarEmbedRanking(10);
+      rankingAnexado = true;
+      if (typeof options === "string") {
+        return { content: options, embeds: [rankEmbed] };
+      }
+      const embeds = Array.isArray(options?.embeds) ? [...options.embeds, rankEmbed] : [rankEmbed];
+      return { ...options, embeds: embeds.slice(0, 10) };
+    } catch (error) {
+      console.error("Nao consegui montar o ranking:", error.message);
+      return options;
+    }
+  };
+
+  interaction.reply = async options => replyOriginal(await payloadComRanking(options));
+  interaction.editReply = async options => editOriginal(await payloadComRanking(options));
+
   try {
+    if (interaction.guild) {
+      atualizarTop1(interaction.guild).catch(() => {});
+    }
     // =========================
     // PING
     // =========================
@@ -3064,7 +3260,7 @@ client.on("interactionCreate", async interaction => {
         "📢 `/embed` — Cria um anúncio bonito (só staff).\n" +
         "💰 `/carteira` — Vê quantas moedas você tem (carteira + banco).\n" +
         "🏦 `/banco` — Guarda moedas no banco (protegidas de roubo) ou saca.\n" +
-        "🎁 `/daily` — Recompensa diária de moedas.\n" +
+        "🎁 `/daily` — Recompensa diária de 250 a 500 moedas.\n" +
         "💼 `/trabalhar` — Faz um trampo por moedas.\n" +
         "🎣 `/pescar` — Pesca por moedas (risco de dar red).\n" +
         "🕵️ `/roubar` — Minigame pra assaltar alguém; se for pego paga 40% do valor da vítima e vai PRESO.\n" +
@@ -3213,46 +3409,10 @@ client.on("interactionCreate", async interaction => {
     // RANK (LEADERBOARD)
     // =========================
     if (interaction.commandName === "rank") {
-      const ranking = [...xpData.entries()]
-        .sort((a, b) => {
-          const totalA = getTotalLevel(a[1]);
-          const totalB = getTotalLevel(b[1]);
-          if (totalB !== totalA) return totalB - totalA;
-          return (b[1].textXp + b[1].voiceXp) - (a[1].textXp + a[1].voiceXp);
-        })
-        .slice(0, 10);
-
-      if (ranking.length === 0) {
-        await interaction.reply("Ainda não rolou nada por aqui. Manda umas mensagens ou entra em call!");
-        return;
-      }
-
-      const MEDALHAS = ["🥇", "🥈", "🥉"];
-
-      const usuarios = await Promise.all(
-        ranking.map(([userId]) => client.users.fetch(userId).catch(() => null))
-      );
-
-      const linhas = ranking.map(([, data], index) => {
-        const user = usuarios[index];
-        const nome = user ? user.username : "Usuário desconhecido";
-        const posicao = MEDALHAS[index] || `**${index + 1}.**`;
-
-        return (
-          `${posicao} **${nome}** — Nível ${getTotalLevel(data)}\n` +
-          `　　💬 Texto: ${data.textLevel}  •  🎙️ Voz: ${data.voiceLevel}`
-        );
-      });
-
-      const embed = new EmbedBuilder()
-        .setTitle("🏆 **Ranking**")
-        .setDescription(linhas.join("\n\n"))
-        .setColor(0xfee75c)
-        .setThumbnail(usuarios[0]?.displayAvatarURL({ size: 256 }) || null)
-        .setFooter({ text: `Top ${ranking.length} de atividade no servidor` });
-
+      const embed = await montarEmbedRanking(10);
       await interaction.reply({ embeds: [embed] });
-      console.log("✅ /rank respondido");
+      await atualizarTop1(interaction.guild);
+      console.log("/rank respondido");
       return;
     }
 
@@ -3428,7 +3588,7 @@ client.on("interactionCreate", async interaction => {
         return;
       }
 
-      const ganho = Math.floor(Math.random() * 151) + 100; // 100 a 250
+      const ganho = Math.floor(Math.random() * (DAILY_MAX - DAILY_MIN + 1)) + DAILY_MIN;
       data.coins += ganho;
       data.lastDaily = now;
 
