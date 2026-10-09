@@ -378,6 +378,7 @@ function normalizarDadosUsuario(data) {
   data.conquistas = Array.isArray(data.conquistas) ? data.conquistas : [];
   data.itemLendario = data.itemLendario === true;
   data.milestonesAlcancados = Array.isArray(data.milestonesAlcancados) ? data.milestonesAlcancados : [];
+  data.comandosDesdeRank = numero(data.comandosDesdeRank);
 
   return data;
 }
@@ -403,7 +404,8 @@ function getUserData(userId) {
       ticketsSorteio: 0,       // quantos bilhetes de sorteio a pessoa tem
       conquistas: [],          // ids de conquistas já desbloqueadas
       itemLendario: false,     // flag de quem já tirou o prêmio raro da caixa/roleta
-      milestonesAlcancados: [] // marcos de moeda (10k, 20k...) já anunciados/recompensados
+      milestonesAlcancados: [], // marcos de moeda (10k, 20k...) já anunciados/recompensados
+      comandosDesdeRank: 0     // ranking aparece a cada 5 comandos por pessoa
     });
   }
 
@@ -3198,6 +3200,12 @@ client.on("interactionCreate", async interaction => {
   const deferOriginal = interaction.deferReply.bind(interaction);
   let rankingAnexado = false;
   let skipRanking = false;
+  const RANK_A_CADA = 5;
+  const dadosRank = getUserData(interaction.user.id);
+  dadosRank.comandosDesdeRank = (dadosRank.comandosDesdeRank || 0) + 1;
+  const mostrarRanking = dadosRank.comandosDesdeRank >= RANK_A_CADA;
+  if (mostrarRanking) dadosRank.comandosDesdeRank = 0;
+  salvarDados();
 
   interaction.deferReply = async options => {
     if (options && options.ephemeral) skipRanking = true;
@@ -3205,7 +3213,7 @@ client.on("interactionCreate", async interaction => {
   };
 
   const payloadComRanking = async options => {
-    if (interaction.commandName === "rank" || rankingAnexado || skipRanking) return options;
+    if (interaction.commandName === "rank" || rankingAnexado || skipRanking || !mostrarRanking) return options;
     const ephemeral = typeof options === "object" && options !== null && options.ephemeral;
     if (ephemeral) return options;
 
