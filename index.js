@@ -405,7 +405,7 @@ function getUserData(userId) {
       conquistas: [],          // ids de conquistas já desbloqueadas
       itemLendario: false,     // flag de quem já tirou o prêmio raro da caixa/roleta
       milestonesAlcancados: [], // marcos de moeda (10k, 20k...) já anunciados/recompensados
-      comandosDesdeRank: 0     // ranking aparece a cada 5 comandos por pessoa
+      comandosDesdeRank: 0     // ranking aparece a cada 8 comandos por pessoa
     });
   }
 
@@ -3200,7 +3200,7 @@ client.on("interactionCreate", async interaction => {
   const deferOriginal = interaction.deferReply.bind(interaction);
   let rankingAnexado = false;
   let skipRanking = false;
-  const RANK_A_CADA = 5;
+  const RANK_A_CADA = 8;
   const dadosRank = getUserData(interaction.user.id);
   dadosRank.comandosDesdeRank = (dadosRank.comandosDesdeRank || 0) + 1;
   const mostrarRanking = dadosRank.comandosDesdeRank >= RANK_A_CADA;
