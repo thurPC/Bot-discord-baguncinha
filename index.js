@@ -95,9 +95,23 @@ const DATA_FILE = path.join(__dirname, "database.json");
 //
 // ⚠️ Repositório PÚBLICO = os dados (IDs do Discord e moedas) ficam visíveis pra
 // qualquer um. Se isso incomodar, aponte GITHUB_REPO pra um repositório PRIVADO.
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPO = process.env.GITHUB_REPO || "thurPC/Bot-discord-baguncinha";
-const GITHUB_DATA_BRANCH = process.env.GITHUB_DATA_BRANCH || "dados";
+function limparSegredo(valor) {
+  if (!valor) return "";
+  return String(valor)
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/^(Bearer|token)\s+/i, "");
+}
+
+function normalizarRepo(repo) {
+  return limparSegredo(repo)
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/\.git$/i, "");
+}
+
+const GITHUB_TOKEN = limparSegredo(process.env.GITHUB_TOKEN);
+const GITHUB_REPO = normalizarRepo(process.env.GITHUB_REPO || "thurPC/Bot-discord-baguncinha");
+const GITHUB_DATA_BRANCH = limparSegredo(process.env.GITHUB_DATA_BRANCH) || "dados";
 const GITHUB_DATA_PATH = "database.json";
 const GITHUB_SAVE_INTERVAL_MS = 5 * 60 * 1000; // no máximo 1 commit a cada 5 min
 
@@ -137,19 +151,34 @@ function dadosParaSalvar() {
   };
 }
 
+function githubErroAuth(status, json) {
+  if (status !== 401 && status !== 403) return null;
+  const detalhe = json?.message || "sem detalhes";
+  return `GitHub recusou o token (${status}: ${detalhe}). Confere GITHUB_TOKEN no Render: precisa ser um Personal Access Token com permissão Contents (leitura e escrita) no repo ${GITHUB_REPO}. Tokens fine-grained precisam marcar Contents: Read and write; tokens clássicos precisam do scope "repo".`;
+}
+
 async function githubRequest(metodo, caminho, corpo) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
+    const headers = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "bot-baguncinha"
+    };
+
+    if (GITHUB_TOKEN) {
+      headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+    }
+
+    if (corpo) {
+      headers["Content-Type"] = "application/json";
+    }
+
     const resposta = await fetch(`https://api.github.com${caminho}`, {
       method: metodo,
-      headers: {
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "bot-baguncinha",
-        "Content-Type": "application/json"
-      },
+      headers,
       body: corpo ? JSON.stringify(corpo) : undefined,
       signal: controller.signal
     });
@@ -167,6 +196,14 @@ async function githubRequest(metodo, caminho, corpo) {
   }
 }
 
+function githubChecarResposta(r, acao) {
+  const erroAuth = githubErroAuth(r.status, r.json);
+  if (erroAuth) throw new Error(erroAuth);
+  if (!r.ok) {
+    throw new Error(`GitHub respondeu ${r.status} ao ${acao} (${r.json?.message || "sem detalhes"})`);
+  }
+}
+
 // Baixa o banco de dados do GitHub. Retorna o objeto, ou null se não existir ainda.
 async function githubCarregar() {
   const r = await githubRequest(
@@ -176,9 +213,7 @@ async function githubCarregar() {
 
   if (r.status === 404) return null; // branch ou arquivo ainda não existem
 
-  if (!r.ok) {
-    throw new Error(`GitHub respondeu ${r.status} ao carregar (${r.json?.message || "sem detalhes"})`);
-  }
+  githubChecarResposta(r, "carregar");
 
   githubSha = r.json.sha;
   const texto = Buffer.from(r.json.content, "base64").toString("utf-8");
@@ -187,7 +222,27 @@ async function githubCarregar() {
   return objeto;
 }
 
-// Cria a branch de dados (a partir da main) se ela ainda não existir
+async function githubShaDaBranchPadrao() {
+  const repo = await githubRequest("GET", `/repos/${GITHUB_REPO}`);
+  githubChecarResposta(repo, `ler o repositório ${GITHUB_REPO}`);
+
+  const nomes = [];
+  if (repo.json?.default_branch) nomes.push(repo.json.default_branch);
+  for (const nome of ["main", "master"]) {
+    if (!nomes.includes(nome)) nomes.push(nome);
+  }
+
+  for (const nome of nomes) {
+    const ref = await githubRequest("GET", `/repos/${GITHUB_REPO}/git/ref/heads/${encodeURIComponent(nome)}`);
+    const erroAuth = githubErroAuth(ref.status, ref.json);
+    if (erroAuth) throw new Error(erroAuth);
+    if (ref.ok && ref.json?.object?.sha) return ref.json.object.sha;
+  }
+
+  throw new Error(`Não achei a branch padrão do GitHub (tentei: ${nomes.join(", ")}). Confere GITHUB_REPO (${GITHUB_REPO}).`);
+}
+
+// Cria a branch de dados (a partir da branch padrão) se ela ainda não existir
 async function githubGarantirBranch() {
   const existe = await githubRequest(
     "GET",
@@ -195,18 +250,23 @@ async function githubGarantirBranch() {
   );
   if (existe.ok) return;
 
-  const main = await githubRequest("GET", `/repos/${GITHUB_REPO}/git/ref/heads/main`);
-  if (!main.ok) {
-    throw new Error(`Não achei a branch main no GitHub (${main.status}). Confere GITHUB_REPO e a permissão do token.`);
+  const erroAuth = githubErroAuth(existe.status, existe.json);
+  if (erroAuth) throw new Error(erroAuth);
+
+  if (existe.status !== 404) {
+    throw new Error(`Não consegui verificar a branch "${GITHUB_DATA_BRANCH}" (${existe.status}: ${existe.json?.message || "sem detalhes"}).`);
   }
 
+  const shaBase = await githubShaDaBranchPadrao();
   const criada = await githubRequest("POST", `/repos/${GITHUB_REPO}/git/refs`, {
     ref: `refs/heads/${GITHUB_DATA_BRANCH}`,
-    sha: main.json.object.sha
+    sha: shaBase
   });
 
   if (!criada.ok && criada.status !== 422) {
-    throw new Error(`Não consegui criar a branch "${GITHUB_DATA_BRANCH}" (${criada.status}).`);
+    const auth = githubErroAuth(criada.status, criada.json);
+    if (auth) throw new Error(auth);
+    throw new Error(`Não consegui criar a branch "${GITHUB_DATA_BRANCH}" (${criada.status}: ${criada.json?.message || "sem detalhes"}).`);
   }
 
   console.log(`🌿 Branch "${GITHUB_DATA_BRANCH}" criada no GitHub.`);
@@ -259,9 +319,7 @@ async function githubSalvar() {
       r = await enviar();
     }
 
-    if (!r.ok) {
-      throw new Error(`GitHub respondeu ${r.status} ao salvar (${r.json?.message || "sem detalhes"})`);
-    }
+    githubChecarResposta(r, "salvar");
 
     githubSha = r.json.content.sha;
     ultimoTextoEnviado = texto;
@@ -309,10 +367,25 @@ function aplicarResetEconomiaSeNecessario() {
   console.log(`♻️ Reset de economia aplicado (v${ECONOMIA_RESET_VERSAO}) — ${afetados} carteira(s) zerada(s).`);
 }
 
+async function githubValidarAcesso() {
+  const repo = await githubRequest("GET", `/repos/${GITHUB_REPO}`);
+  githubChecarResposta(repo, `acessar o repositório ${GITHUB_REPO}`);
+
+  const permissoes = repo.json?.permissions || {};
+  if (permissoes.push === false) {
+    throw new Error(
+      `O token acessa ${GITHUB_REPO}, mas não tem permissão de escrita. No GitHub: Settings > Developer settings > Personal access tokens — Contents precisa ser Read and write (fine-grained) ou scope "repo" (clássico).`
+    );
+  }
+
+  console.log(`☁️ GitHub ok: ${GITHUB_REPO} (branch de dados: ${GITHUB_DATA_BRANCH}).`);
+}
+
 async function carregarDados() {
   // 1) GitHub é a fonte principal (sobrevive a deploy)
   if (GITHUB_TOKEN) {
     try {
+      await githubValidarAcesso();
       const doGithub = await githubCarregar();
       if (doGithub) {
         aplicarDadosCarregados(doGithub);
