@@ -32,6 +32,9 @@ const GUILD_ID = "1370256381701128192";
 const PORT = process.env.PORT || 10000;
 const THESPORTSDB_KEY = process.env.THESPORTSDB_KEY || "3";
 
+// Canal fixo onde os avisos de futebol são publicados.
+const FUTEBOL_CHANNEL_ID = "1558342389905625238";
+
 // ID do Discord de quem pode mudar as imagens da loja (só você).
 // Configure a variável OWNER_ID no Render.
 const OWNER_ID = process.env.OWNER_ID;
@@ -2252,6 +2255,20 @@ async function acharCanalPorNome(guild, nomesAlvo) {
 }
 
 async function ensureFutebolChannel(guild) {
+  if (FUTEBOL_CHANNEL_ID) {
+    try {
+      const fixo = await guild.channels.fetch(FUTEBOL_CHANNEL_ID).catch(() => null);
+      if (fixo && (fixo.type === ChannelType.GuildText || fixo.type === ChannelType.GuildAnnouncement)) {
+        console.log(`✅ Avisos de futebol no canal fixo #${fixo.name} (${fixo.id}).`);
+        return fixo;
+      }
+      console.error(`❌ Canal de futebol ${FUTEBOL_CHANNEL_ID} não encontrado ou não é de texto.`);
+    } catch (error) {
+      console.error(`❌ Falha ao buscar o canal de futebol ${FUTEBOL_CHANNEL_ID}:`, error.message);
+    }
+    return null;
+  }
+
   let channel = await acharCanalPorNome(guild, ["futebol", "football"]);
 
   if (!channel) {
@@ -2275,7 +2292,8 @@ async function ensureFutebolChannel(guild) {
 async function checkFootball() {
   if (!futebolChannelId) return;
 
-  const channel = client.channels.cache.get(futebolChannelId);
+  const channel = client.channels.cache.get(futebolChannelId)
+    || await client.channels.fetch(futebolChannelId).catch(() => null);
   if (!channel) return;
 
   try {
