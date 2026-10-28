@@ -26,17 +26,20 @@ const path = require("path");
 // =========================
 // CONFIGURAÇÃO
 // =========================
-const TOKEN = process.env.TOKEN;
+const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = "1370256381701128192";
 const PORT = process.env.PORT || 10000;
-const THESPORTSDB_KEY = process.env.THESPORTSDB_KEY || "3";
+const THESPORTSDB_KEY_RAW = String(process.env.THESPORTSDB_KEY || "123").trim();
+const THESPORTSDB_KEY = !THESPORTSDB_KEY_RAW || THESPORTSDB_KEY_RAW === "3" || THESPORTSDB_KEY_RAW === "1"
+  ? "123"
+  : THESPORTSDB_KEY_RAW;
 
 // Canal fixo onde os avisos de futebol são publicados.
 const FUTEBOL_CHANNEL_ID = "1558342389905625238";
 
 // ID do Discord de quem pode mudar as imagens da loja (só você).
-// Configure a variável OWNER_ID no Render.
+// Configure a variável OWNER_ID no painel do FadeHost.
 const OWNER_ID = process.env.OWNER_ID;
 
 // itemId -> URL da imagem mostrada na prévia/compra (só o dono altera via /lojaimagem)
@@ -79,19 +82,18 @@ const xpData = new Map(); // key: userId, value: { textXp, textLevel, voiceXp, v
 // =========================
 // PERSISTÊNCIA EM JSON
 // =========================
-// ⚠️ O disco do Render é temporário: sobrevive a "dormir e acordar", mas
-// some quando você faz um novo deploy (o container é recriado do zero).
-const DATA_FILE = path.join(__dirname, "database.json");
+// No FadeHost o código fica em /data/app e é resetado a cada deploy.
+// Arquivos escritos em /data (fora do app) sobrevivem a redeploy.
+const DATA_DIR = fs.existsSync("/data") ? "/data" : __dirname;
+const DATA_FILE = path.join(DATA_DIR, "database.json");
 
 // =========================
 // BACKUP PERMANENTE NO GITHUB
 // =========================
-// O disco do Render é apagado a cada deploy, então o progresso também é salvo
-// num arquivo dentro do seu repositório do GitHub, numa branch separada
-// (GITHUB_DATA_BRANCH, padrão "dados"). Branch separada = o Render NÃO faz
-// redeploy a cada salvamento (ele só observa a "main").
+// Extra: o progresso também pode ser salvo no GitHub, numa branch separada
+// (GITHUB_DATA_BRANCH, padrão "dados"), pra não perder nada se o disco local falhar.
 //
-// Variáveis de ambiente no Render:
+// Variáveis de ambiente no FadeHost:
 //   GITHUB_TOKEN        (obrigatória) token com permissão de escrever em "Contents"
 //   GITHUB_REPO         (opcional)    padrão: thurPC/Bot-discord-baguncinha
 //   GITHUB_DATA_BRANCH  (opcional)    padrão: dados
@@ -157,7 +159,7 @@ function dadosParaSalvar() {
 function githubErroAuth(status, json) {
   if (status !== 401 && status !== 403) return null;
   const detalhe = json?.message || "sem detalhes";
-  return `GitHub recusou o token (${status}: ${detalhe}). Confere GITHUB_TOKEN no Render: precisa ser um Personal Access Token com permissão Contents (leitura e escrita) no repo ${GITHUB_REPO}. Tokens fine-grained precisam marcar Contents: Read and write; tokens clássicos precisam do scope "repo".`;
+  return `GitHub recusou o token (${status}: ${detalhe}). Confere GITHUB_TOKEN no FadeHost: precisa ser um Personal Access Token com permissão Contents (leitura e escrita) no repo ${GITHUB_REPO}. Tokens fine-grained precisam marcar Contents: Read and write; tokens clássicos precisam do scope "repo".`;
 }
 
 async function githubRequest(metodo, caminho, corpo) {
@@ -400,7 +402,7 @@ async function carregarDados() {
       console.error("❌ Erro ao carregar do GitHub (tentando o arquivo local):", error.message);
     }
   } else {
-    console.log("⚠️ GITHUB_TOKEN não configurado — o progresso só fica salvo no disco do Render (some a cada deploy).");
+    console.log("⚠️ GITHUB_TOKEN não configurado — o progresso fica só no disco local (/data no FadeHost).");
   }
 
   // 2) Plano B: arquivo local
@@ -2057,15 +2059,14 @@ async function registerCommands() {
 // =========================
 // AVISOS DE FUTEBOL (BRASILEIRÃO + SELEÇÃO)
 // =========================
-// Fonte: TheSportsDB (gratuita, sem cadastro). Docs: https://www.thesportsdb.com/api.php
-// A chave de teste "3" já funciona. Quem tiver Patreon pode colocar THESPORTSDB_KEY no Render.
-//
-// APIs avaliadas:
-//   TheSportsDB          — grátis, sem chave, cobre Brasil. USADA.
-//   football-data.org    — grátis com cadastro, mas Série A/Copa do Brasil pedem plano pago.
-//   API-Football         — 100 req/dia com chave; o bot antigo dependia só disso e parava sem a chave.
-//   ESPN site.api        — sem chave, mas bloqueia este ambiente (403).
+// Fonte principal: TheSportsDB. A chave gratuita antiga "3" foi desativada (403).
+// A chave gratuita atual é "123". Se a TheSportsDB bloquear o IP do host, cai na ESPN.
 const SPORTSDB_API_BASE = `https://www.thesportsdb.com/api/v1/json/${THESPORTSDB_KEY}`;
+const HTTP_BROWSER_HEADERS = {
+  Accept: "application/json",
+  "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+};
 
 const LIGAS_FUTEBOL = [
   { id: "4351", nome: "Brasileirão Série A" },
@@ -2074,6 +2075,13 @@ const LIGAS_FUTEBOL = [
   { id: "4501", nome: "Copa Libertadores" }
 ];
 const SELECAO_TEAM_ID = "134496";
+const ESPN_LIGAS = [
+  { slug: "bra.1", nome: "Brasileirão Série A" },
+  { slug: "bra.2", nome: "Brasileirão Série B" },
+  { slug: "conmebol.libertadores", nome: "Copa Libertadores" }
+];
+const ESPN_SELECAO_SLUGS = ["fifa.friendly", "fifa.world"];
+const ESPN_SELECAO_TEAM_ID = "205";
 
 let futebolChannelId = null;
 const FOOTBALL_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -2086,9 +2094,42 @@ let jogosCache = { timestamp: 0, dados: null };
 const JOGOS_CACHE_MS = 10 * 60 * 1000;
 let eventosFutebolCache = { timestamp: 0, dados: [] };
 const EVENTOS_CACHE_MS = 8 * 60 * 1000;
+let futebolFonte = "TheSportsDB";
 
 function esperar(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function httpJsonFetch(url, origem) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(url, {
+      headers: HTTP_BROWSER_HEADERS,
+      signal: controller.signal
+    });
+    const texto = await response.text();
+
+    if (!response.ok) {
+      const detalhe = texto ? texto.replace(/\s+/g, " ").slice(0, 160) : "";
+      throw new Error(
+        detalhe
+          ? `${origem} respondeu ${response.status}: ${detalhe}`
+          : `${origem} respondeu ${response.status}`
+      );
+    }
+
+    if (!texto) return {};
+    return JSON.parse(texto);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`Tempo esgotado conectando em ${origem} (12s)`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function sportsDbFetch(endpoint, params) {
@@ -2096,34 +2137,7 @@ async function sportsDbFetch(endpoint, params) {
   Object.entries(params || {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null) url.searchParams.set(key, value);
   });
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-  try {
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "bot-baguncinha"
-      },
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error(`TheSportsDB respondeu ${response.status}`);
-    }
-
-    const texto = await response.text();
-    if (!texto) return {};
-    return JSON.parse(texto);
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error("Tempo esgotado conectando na TheSportsDB (12s)");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  return httpJsonFetch(url, "TheSportsDB");
 }
 
 function parseKickoffMs(evento) {
@@ -2186,11 +2200,80 @@ function deduplicarEventos(lista) {
   return unicos;
 }
 
-async function coletarEventosFutebol() {
-  if (eventosFutebolCache.dados.length && Date.now() - eventosFutebolCache.timestamp < EVENTOS_CACHE_MS) {
-    return eventosFutebolCache.dados;
+function espnStatusParaSportsDb(tipo) {
+  const state = String(tipo?.state || "").toLowerCase();
+  const nome = String(tipo?.name || "").toUpperCase();
+  if (state === "in" || nome.includes("IN_PROGRESS") || nome.includes("HALFTIME")) return "LIVE";
+  if (state === "post" || tipo?.completed || nome.includes("FINAL") || nome.includes("FULL_TIME")) return "FT";
+  if (nome.includes("POSTPONED") || nome.includes("CANCELED") || nome.includes("CANCELLED")) return "OFF";
+  return "NS";
+}
+
+function espnEventoParaSportsDb(evento, ligaNome) {
+  const competicao = (evento.competitions && evento.competitions[0]) || {};
+  const times = competicao.competitors || [];
+  const mandante = times.find(t => t.homeAway === "home") || times[0] || {};
+  const visitante = times.find(t => t.homeAway === "away") || times[1] || {};
+  const dataIso = evento.date || competicao.date || "";
+  const kickoff = Date.parse(dataIso);
+  const dataEvento = Number.isNaN(kickoff)
+    ? ""
+    : new Date(kickoff).toISOString().slice(0, 10);
+  const hora = Number.isNaN(kickoff)
+    ? ""
+    : new Date(kickoff).toISOString().slice(11, 19);
+
+  return {
+    idEvent: String(evento.id || competicao.id || `${ligaNome}-${dataIso}`),
+    strHomeTeam: mandante.team?.displayName || mandante.team?.name || "Mandante",
+    strAwayTeam: visitante.team?.displayName || visitante.team?.name || "Visitante",
+    strLeague: ligaNome || evento.league?.name || "Futebol",
+    strStatus: espnStatusParaSportsDb(competicao.status?.type),
+    strTimestamp: dataIso,
+    dateEvent: dataEvento,
+    strTime: hora,
+    intHomeScore: mandante.score ?? null,
+    intAwayScore: visitante.score ?? null
+  };
+}
+
+async function coletarEventosEspn() {
+  const eventos = [];
+
+  for (const liga of ESPN_LIGAS) {
+    try {
+      const data = await httpJsonFetch(
+        `https://site.api.espn.com/apis/site/v2/sports/soccer/${liga.slug}/scoreboard`,
+        "ESPN"
+      );
+      for (const evento of data?.events || []) {
+        eventos.push(espnEventoParaSportsDb(evento, liga.nome));
+      }
+    } catch (error) {
+      console.error(`❌ Falha ESPN (${liga.slug}):`, error.message);
+    }
+    await esperar(200);
   }
 
+  for (const slug of ESPN_SELECAO_SLUGS) {
+    try {
+      const data = await httpJsonFetch(
+        `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/teams/${ESPN_SELECAO_TEAM_ID}/schedule`,
+        "ESPN"
+      );
+      for (const evento of data?.events || []) {
+        eventos.push(espnEventoParaSportsDb(evento, data?.league?.name || "Seleção Brasileira"));
+      }
+    } catch (error) {
+      console.error(`❌ Falha ESPN seleção (${slug}):`, error.message);
+    }
+    await esperar(200);
+  }
+
+  return eventos;
+}
+
+async function coletarEventosTheSportsDb() {
   const eventos = [];
   const chamadas = [];
 
@@ -2224,7 +2307,24 @@ async function coletarEventosFutebol() {
     await esperar(250);
   }
 
+  return eventos;
+}
+
+async function coletarEventosFutebol() {
+  if (eventosFutebolCache.dados.length && Date.now() - eventosFutebolCache.timestamp < EVENTOS_CACHE_MS) {
+    return eventosFutebolCache.dados;
+  }
+
+  let eventos = await coletarEventosTheSportsDb();
+  futebolFonte = "TheSportsDB";
+  if (eventos.length === 0) {
+    console.log("⚠️ TheSportsDB vazia/bloqueada — tentando ESPN.");
+    eventos = await coletarEventosEspn();
+    futebolFonte = "ESPN";
+  }
+
   const unicos = deduplicarEventos(eventos);
+  console.log(`⚽ ${unicos.length} jogo(s) carregado(s) via ${futebolFonte}.`);
   eventosFutebolCache = { timestamp: Date.now(), dados: unicos };
   return unicos;
 }
@@ -2399,7 +2499,7 @@ client.once("ready", async () => {
   if (futebolChannelId) {
     setInterval(checkFootball, FOOTBALL_CHECK_INTERVAL_MS);
     checkFootball();
-    console.log(`⚽ Avisos de futebol ativados (a cada ${FOOTBALL_CHECK_INTERVAL_MS / 60000} min, TheSportsDB)`);
+    console.log(`⚽ Avisos de futebol ativados (a cada ${FOOTBALL_CHECK_INTERVAL_MS / 60000} min, chave ${THESPORTSDB_KEY})`);
   } else {
     console.log("⚠️ Canal #futebol não disponível — avisos de futebol desativados.");
   }
@@ -4177,7 +4277,7 @@ client.on("interactionCreate", async interaction => {
           .setTitle("📅 Próximos jogos")
           .setDescription(linhas.join("\n\n"))
           .setColor(0x2ecc71)
-          .setFooter({ text: "Fonte: TheSportsDB" });
+          .setFooter({ text: `Fonte: ${futebolFonte}` });
 
         await interaction.editReply({ embeds: [embed] });
       } catch (error) {
@@ -4429,7 +4529,7 @@ async function ensureInterestRoles(guild) {
 }
 
 // =========================
-// SERVIDOR HTTP — RENDER (só pra manter o serviço vivo)
+// SERVIDOR HTTP — health check / endereço web do FadeHost
 // =========================
 const server = http.createServer((req, res) => {
   res.writeHead(200, {
@@ -4475,7 +4575,7 @@ setInterval(() => {
   if (dadosAlterados) githubSalvar();
 }, GITHUB_SAVE_INTERVAL_MS);
 
-// Quando o Render manda desligar (deploy novo, reinício), salva no disco E no GitHub
+// Quando o host manda desligar (deploy novo, reinício), salva no disco E no GitHub
 // antes de fechar — é isso que evita perder o progresso dos últimos minutos.
 let encerrando = false;
 async function encerrarComSalvamento() {
