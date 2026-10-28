@@ -153,7 +153,8 @@ function dadosParaSalvar() {
     ...Object.fromEntries(xpData),
     __lojaImagens: lojaImagens,
     __economiaReset: economiaResetVersao,
-    __top1: top1Estado
+    __top1: top1Estado,
+    __verificacaoImagem: verificacaoImagemUrl
   };
 }
 
@@ -369,6 +370,10 @@ function aplicarDadosCarregados(objeto) {
         since: Number(valor?.since) || 0,
         roleGranted: valor?.roleGranted === true
       };
+      continue;
+    }
+    if (chave === "__verificacaoImagem") {
+      verificacaoImagemUrl = valor || null;
       continue;
     }
     xpData.set(chave, normalizarDadosUsuario(valor));
@@ -2545,13 +2550,14 @@ const INTEREST_BOTOES = [
 const VERIFICACAO_MARCADOR = "verificacao-baguncinha";
 const VERIFICACAO_BTN_PREFIX = "verificacao:";
 let verificacaoMessageId = null;
+let verificacaoImagemUrl = null;
 
 function montarEmbedVerificacao() {
   const lista = INTEREST_BOTOES
     .map(b => `• ${(NOMES_INTERESSES[b.id] || b.label).replace(/^[^\p{L}\p{N}]+/u, "").trim()}`)
     .join("\n");
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle("Verificacao de acesso")
     .setDescription(
       "Bem-vindo(a) a Baguncinha! Pra liberar o acesso ao resto do servidor, clica no botao " +
@@ -2561,6 +2567,9 @@ function montarEmbedVerificacao() {
     )
     .setColor(0x5865f2)
     .setFooter({ text: VERIFICACAO_MARCADOR });
+
+  if (verificacaoImagemUrl) embed.setImage(verificacaoImagemUrl);
+  return embed;
 }
 
 function montarBotoesVerificacao() {
@@ -2618,9 +2627,14 @@ async function ensureVerificacaoMessage(channel) {
       .filter(ehMensagemVerificacao)
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
+    const existente = existentes[0];
+    if (existente) {
+      const imagemAtual = existente.embeds[0]?.image?.url;
+      if (imagemAtual) verificacaoImagemUrl = imagemAtual;
+    }
+
     const embed = montarEmbedVerificacao();
     const components = montarBotoesVerificacao();
-    const existente = existentes[0];
 
     if (existente) {
       await existente.edit({ embeds: [embed], components }).catch(() => {});
@@ -2887,6 +2901,7 @@ function botoesFromMensagem(mensagem) {
     for (const comp of row.components || []) {
       const label = comp.label || "Botão";
       const customId = comp.customId || "";
+      if (customId.startsWith(VERIFICACAO_BTN_PREFIX)) continue;
       if (comp.style === ButtonStyle.Link && comp.url) {
         botoes.push({ tipo: "link", label, url: comp.url });
       } else if (customId.startsWith("embedbtn:cargo:")) {
@@ -2897,6 +2912,13 @@ function botoesFromMensagem(mensagem) {
     }
   }
   return botoes.slice(0, EMBED_BOTOES_MAX);
+}
+
+function mensagemEhVerificacao(mensagem, draft) {
+  if (mensagem && ehMensagemVerificacao(mensagem)) return true;
+  if (draft?.footer === VERIFICACAO_MARCADOR) return true;
+  if (verificacaoMessageId && draft?.editMessageId === verificacaoMessageId) return true;
+  return false;
 }
 
 function draftFromMensagem(mensagem, autorNome) {
@@ -3198,9 +3220,17 @@ async function handleEmbedBuilderInteraction(interaction) {
       }
 
       try {
+        const ehVerificacao = mensagemEhVerificacao(mensagem, draft);
+        const embed = montarPreviewEmbed(draft);
+        if (ehVerificacao) {
+          embed.setFooter({ text: VERIFICACAO_MARCADOR });
+          verificacaoImagemUrl = draft.imagemUrl || null;
+          salvarDados();
+        }
+
         await mensagem.edit({
-          embeds: [montarPreviewEmbed(draft)],
-          components: montarBotoesPublicos(draft.botoes)
+          embeds: [embed],
+          components: ehVerificacao ? montarBotoesVerificacao() : montarBotoesPublicos(draft.botoes)
         });
         embedDrafts.delete(userId);
         await interaction.update({ content: `✅ Embed atualizado em ${canal}.`, embeds: [], components: [] });
