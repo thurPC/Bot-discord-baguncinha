@@ -2734,7 +2734,7 @@ client.on("messageCreate", async message => {
 // =========================
 // A cada X minutos, todo mundo que está conectado em um canal de voz
 // (menos o canal AFK e bots) ganha XP de voz. É separado do XP de texto.
-const VOICE_XP_INTERVAL_MS = 5 * 60 * 1000; // a cada 5 minutos
+const VOICE_XP_INTERVAL_MS = 15 * 60 * 1000;
 
 async function tickVoiceXp() {
   const guild = client.guilds.cache.get(GUILD_ID);
@@ -2748,7 +2748,7 @@ async function tickVoiceXp() {
     for (const member of channel.members.values()) {
       if (member.user.bot) continue;
 
-      const xpGained = Math.floor(Math.random() * 10) + 15; // 15 a 24 XP a cada 5 min
+      const xpGained = Math.floor(Math.random() * 28) + 45;
       const { leveledUp, data: updated } = addXp(member.id, xpGained, "voice");
 
       if (leveledUp) {
