@@ -124,6 +124,7 @@ let githubSha = null;        // "versão" atual do arquivo no GitHub (necessári
 let dadosAlterados = false;  // true = tem coisa nova que ainda não foi pro GitHub
 let salvandoGithub = false;  // evita dois salvamentos ao mesmo tempo
 let ultimoTextoEnviado = null; // conteúdo do último envio (pra não commitar sem mudança)
+let githubBackupAtivo = Boolean(GITHUB_TOKEN);
 let economiaResetVersao = 0;   // versão do último reset de saldos aplicado (ver resetarEconomia)
 let top1Estado = { userId: null, since: 0, roleGranted: false };
 
@@ -159,7 +160,7 @@ function dadosParaSalvar() {
 function githubErroAuth(status, json) {
   if (status !== 401 && status !== 403) return null;
   const detalhe = json?.message || "sem detalhes";
-  return `GitHub recusou o token (${status}: ${detalhe}). Confere GITHUB_TOKEN no FadeHost: precisa ser um Personal Access Token com permissão Contents (leitura e escrita) no repo ${GITHUB_REPO}. Tokens fine-grained precisam marcar Contents: Read and write; tokens clássicos precisam do scope "repo".`;
+  return `GitHub recusou o token (${status}: ${detalhe}). No FadeHost, apaga GITHUB_TOKEN se não for usar backup no GitHub (o disco /data já guarda o progresso). Se quiser o backup, gera um Personal Access Token novo com Contents: Read and write no repo ${GITHUB_REPO}.`;
 }
 
 async function githubRequest(metodo, caminho, corpo) {
@@ -277,8 +278,16 @@ async function githubGarantirBranch() {
   console.log(`🌿 Branch "${GITHUB_DATA_BRANCH}" criada no GitHub.`);
 }
 
+function desativarBackupGithub(motivo) {
+  if (!githubBackupAtivo) return;
+  githubBackupAtivo = false;
+  dadosAlterados = false;
+  console.error("❌ Backup no GitHub desligado:", motivo);
+  console.error("ℹ️ O progresso continua salvo em", DATA_FILE, "— no FadeHost isso sobrevive a redeploy.");
+}
+
 async function githubSalvar() {
-  if (!GITHUB_TOKEN || salvandoGithub) return;
+  if (!githubBackupAtivo || !GITHUB_TOKEN || salvandoGithub) return;
 
   salvandoGithub = true;
   dadosAlterados = false; // se alguém mexer durante o envio, vira true de novo
@@ -330,8 +339,13 @@ async function githubSalvar() {
     ultimoTextoEnviado = texto;
     console.log(`☁️ Progresso salvo no GitHub (${xpData.size} usuário(s)).`);
   } catch (error) {
-    dadosAlterados = true; // tenta de novo no próximo ciclo
-    console.error("❌ Erro ao salvar no GitHub:", error.message);
+    const msg = error.message || String(error);
+    if (/401|403|Bad credentials|recusou o token/i.test(msg)) {
+      desativarBackupGithub(msg);
+    } else {
+      dadosAlterados = true;
+      console.error("❌ Erro ao salvar no GitHub:", msg);
+    }
   } finally {
     salvandoGithub = false;
   }
@@ -399,7 +413,11 @@ async function carregarDados() {
       }
       console.log("☁️ Ainda não tem backup no GitHub — vai ser criado no primeiro salvamento.");
     } catch (error) {
-      console.error("❌ Erro ao carregar do GitHub (tentando o arquivo local):", error.message);
+      const msg = error.message || String(error);
+      console.error("❌ Erro ao carregar do GitHub (tentando o arquivo local):", msg);
+      if (/401|403|Bad credentials|recusou o token/i.test(msg)) {
+        desativarBackupGithub(msg);
+      }
     }
   } else {
     console.log("⚠️ GITHUB_TOKEN não configurado — o progresso fica só no disco local (/data no FadeHost).");
